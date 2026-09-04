@@ -5,6 +5,7 @@
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 
 -- ============================================
 -- SOURCES TABLE
@@ -46,7 +47,7 @@ CREATE TABLE source_chunks (
     source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(1536), -- pgvector embedding (1536 dims for text-embedding-3-small)
+    embedding extensions.vector(768), -- pgvector embedding (768 dims, L2-normalized, for Gemini gemini-embedding-001)
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
@@ -55,7 +56,7 @@ CREATE TABLE source_chunks (
 
 -- Indexes for source_chunks
 CREATE INDEX idx_source_chunks_source_id ON source_chunks(source_id);
-CREATE INDEX idx_source_chunks_embedding ON source_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_source_chunks_embedding ON source_chunks USING ivfflat (embedding extensions.vector_cosine_ops) WITH (lists = 100);
 
 -- ============================================
 -- EVENTS TABLE

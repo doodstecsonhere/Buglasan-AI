@@ -91,7 +91,7 @@ DROP TRIGGER IF EXISTS update_events_updated_at ON events;
 
 -- Drop functions
 DROP FUNCTION IF EXISTS update_updated_at_column();
-DROP FUNCTION IF EXISTS search_source_chunks(VECTOR(768), INT, FLOAT, INT);
+DROP FUNCTION IF EXISTS search_source_chunks(extensions.vector(768), INT, FLOAT, INT);
 DROP FUNCTION IF EXISTS get_festival_events(INT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT[], TEXT[]);
 DROP FUNCTION IF EXISTS get_supersession_chain(UUID);
 
@@ -106,7 +106,7 @@ DROP TABLE IF EXISTS sources CASCADE;
 -- ============================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS "vector";  -- pgvector for embeddings
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;  -- pgvector for embeddings
 
 -- ============================================
 -- SOURCES TABLE
@@ -171,7 +171,7 @@ CREATE TABLE source_chunks (
     source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(768),  -- pgvector embedding (768 dims, L2-normalized, for Gemini gemini-embedding-001)
+    embedding extensions.vector(768),  -- pgvector embedding (768 dims, L2-normalized, for Gemini gemini-embedding-001)
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
@@ -181,7 +181,7 @@ CREATE TABLE source_chunks (
 -- Indexes for source_chunks
 CREATE INDEX idx_source_chunks_source_id ON source_chunks(source_id);
 -- IVFFlat index for cosine similarity search (lists tuned for expected data size)
-CREATE INDEX idx_source_chunks_embedding ON source_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX idx_source_chunks_embedding ON source_chunks USING ivfflat (embedding extensions.vector_cosine_ops) WITH (lists = 100);
 
 -- ============================================
 -- EVENTS TABLE
@@ -284,7 +284,7 @@ CREATE TRIGGER update_events_updated_at
 -- Without normalization, pgvector's `<=>` cosine distance produces values that
 -- do not match the model's intended cosine similarity.
 CREATE OR REPLACE FUNCTION search_source_chunks(
-    query_embedding VECTOR(768),
+    query_embedding extensions.vector(768),
     target_festival_year INT,
     match_threshold FLOAT DEFAULT 0.7,
     match_count INT DEFAULT 10
@@ -305,7 +305,7 @@ CREATE OR REPLACE FUNCTION search_source_chunks(
         sc.source_id,
         sc.chunk_index,
         sc.content,
-        1 - (sc.embedding <=> query_embedding) AS similarity,
+        1 - (sc.embedding OPERATOR(extensions.<=>) query_embedding) AS similarity,
         s.platform AS source_platform,
         s.published_at AS source_published_at,
         s.festival_year AS source_festival_year,
@@ -315,8 +315,8 @@ CREATE OR REPLACE FUNCTION search_source_chunks(
     JOIN sources s ON sc.source_id = s.id
     WHERE s.festival_year = target_festival_year
         AND s.status IN ('active', 'updated', 'postponed')  -- only current-authoritative
-        AND 1 - (sc.embedding <=> query_embedding) > match_threshold
-    ORDER BY sc.embedding <=> query_embedding
+        AND 1 - (sc.embedding OPERATOR(extensions.<=>) query_embedding) > match_threshold
+    ORDER BY sc.embedding OPERATOR(extensions.<=>) query_embedding
     LIMIT match_count;
 $$;
 
