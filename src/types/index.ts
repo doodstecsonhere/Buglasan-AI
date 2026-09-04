@@ -7,7 +7,22 @@ export type FestivalYear = number
 
 export type Platform = 'facebook' | 'instagram' | 'website' | 'pdf' | 'news' | 'official'
 
-export type SourceStatus = 'active' | 'superseded' | 'archived' | 'draft'
+/**
+ * Canonical Source Status Model
+ * 
+ * | Status       | Meaning                                                            | is_current (derived) |
+ * | ------------ | ------------------------------------------------------------------ | -------------------- |
+ * | `active`     | Current, authoritative announcement for its festival year          | `true`               |
+ * | `updated`    | Supersedes a previous source; the new authoritative version        | `true`               |
+ * | `superseded` | Replaced by a newer `updated` source; preserved for history        | `false`              |
+ * | `cancelled`  | Information explicitly cancelled (event cancelled, withdrawn)      | `false`              |
+ * | `postponed`  | Information about a postponement; new date may be in another source| `true`               |
+ * | `archived`   | Historical record from past festival years; not current            | `false`              |
+ * 
+ * `is_current` is a GENERATED ALWAYS AS (status IN ('active', 'updated', 'postponed')) STORED column in DB
+ * NOT user-settable - derived from status automatically
+ */
+export type SourceStatus = 'active' | 'updated' | 'superseded' | 'cancelled' | 'postponed' | 'archived'
 
 export type EventCategory = 
   | 'ceremony' 
@@ -22,6 +37,13 @@ export type EventCategory =
   | 'parade' 
   | 'other'
 
+/**
+ * Event Status
+ * 
+ * `is_current` is a GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED column in DB
+ * - `scheduled`, `confirmed` → `is_current = true`
+ * - `cancelled`, `postponed`, `completed` → `is_current = false`
+ */
 export type EventStatus = 'scheduled' | 'confirmed' | 'cancelled' | 'postponed' | 'completed'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
@@ -35,11 +57,13 @@ export interface Source {
   festivalYear: FestivalYear
   rawText: string
   normalizedText: string
-  isCurrent: boolean
   status: SourceStatus
   supersedesSourceId?: string
   ingestedAt: Date
   updatedAt: Date
+  // isCurrent is now a computed column in DB (GENERATED ALWAYS AS)
+  // Not included in TypeScript interface - derive from status when needed:
+  // isCurrent = ['active', 'updated', 'postponed'].includes(status)
 }
 
 export interface SourceChunk {
@@ -66,10 +90,12 @@ export interface Event {
   fees?: string
   contactInfo?: string
   status: EventStatus
-  isCurrent: boolean
   festivalYear: FestivalYear
   createdAt: Date
   updatedAt: Date
+  // isCurrent is now a computed column in DB (GENERATED ALWAYS AS)
+  // Not included in TypeScript interface - derive from status when needed:
+  // isCurrent = ['scheduled', 'confirmed'].includes(status)
 }
 
 export interface EventSource {
@@ -95,8 +121,9 @@ export interface SourceCitation {
   postUrl: string
   publishedAt: Date
   festivalYear: FestivalYear
-  isCurrent: boolean
+  status: SourceStatus
   supersedesSourceId?: string
+  // isCurrent derived from status
 }
 
 export interface ChatRequest {
@@ -128,6 +155,52 @@ export interface RetrievalResult {
   chunks: SourceChunk[]
 }
 
+/**
+ * RPC Function Return Types
+ */
+
+export interface SearchSourceChunksResult {
+  chunkId: string
+  sourceId: string
+  chunkIndex: number
+  content: string
+  similarity: number
+  sourcePlatform: Platform
+  sourcePublishedAt: Date
+  sourceFestivalYear: FestivalYear
+  sourceStatus: SourceStatus
+  sourceSupersedesSourceId?: string
+}
+
+export interface GetFestivalEventsResult {
+  id: string
+  eventName: string
+  aliases: string[]
+  description: string
+  category: EventCategory
+  startDatetime: Date
+  endDatetime: Date
+  venue: string
+  organizer: string
+  deadline?: Date
+  eligibility?: string
+  fees?: string
+  contactInfo?: string
+  status: EventStatus
+  festivalYear: FestivalYear
+}
+
+export interface GetSupersessionChainResult {
+  sourceId: string
+  platform: Platform
+  postId: string
+  publishedAt: Date
+  festivalYear: FestivalYear
+  status: SourceStatus
+  supersedesSourceId?: string
+  level: number
+}
+
 export interface DateResolution {
   resolvedDate: Date
   isRelative: boolean
@@ -153,4 +226,15 @@ export interface PWAConfig {
     type: string
     purpose?: string
   }>
+}
+
+/**
+ * Helper type guards for derived isCurrent
+ */
+export function isSourceCurrent(source: Source): boolean {
+  return ['active', 'updated', 'postponed'].includes(source.status)
+}
+
+export function isEventCurrent(event: Event): boolean {
+  return ['scheduled', 'confirmed'].includes(event.status)
 }
