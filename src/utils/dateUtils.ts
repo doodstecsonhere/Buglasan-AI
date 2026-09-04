@@ -19,16 +19,22 @@ export function getCurrentDateInPH(): Date {
 /**
  * Get current festival year based on Asia/Manila current date
  * Buglasan Festival typically happens in October
- * If current month >= October, festival year = current year + 1 (upcoming)
- * Otherwise festival year = current year
+ * Defaults to CURRENT CALENDAR YEAR in Asia/Manila ALWAYS.
+ * Festival occurs in October but year does NOT advance early.
+ *
+ * Examples:
+ * - September 2026 → default 2026
+ * - October 2026 → default 2026 (NOT 2027)
+ * - November 2026 → default 2026
+ * - January 2027 → default 2027
  */
 export function getCurrentFestivalYear(): FestivalYear {
   const now = getCurrentDateInPH()
   const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() // 0-indexed, 9 = October
   
-  // Festival is in October, so if we're in or past October, next festival is next year
-  return currentMonth >= 9 ? currentYear + 1 : currentYear
+  // Always return current calendar year in Asia/Manila
+  // Festival year does not advance early (e.g., October doesn't mean next year)
+  return currentYear
 }
 
 /**
