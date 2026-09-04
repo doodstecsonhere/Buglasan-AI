@@ -144,7 +144,12 @@ interface ChatResponse {
 // ============================================
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!
 const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
-const GEMINI_EMBEDDING_MODEL = Deno.env.get('GEMINI_EMBEDDING_MODEL') || 'text-embedding-004'
+// Default embedding model. Override with the GEMINI_EMBEDDING_MODEL env var.
+// gemini-embedding-001 is the current production-recommended Gemini text-only
+// embedding model. Vectors are requested with outputDimensionality=768 and
+// L2-normalized at write time / before RPC calls — see normalizeEmbedding().
+const GEMINI_EMBEDDING_MODEL = Deno.env.get('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-001'
+const EMBEDDING_DIMENSION = 768
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
@@ -357,12 +362,54 @@ function resolveTemporalExpression(query: string, currentDate: Date): { startDat
 // ============================================
 
 /**
- * Generate a 768-dimensional query embedding using Gemini's text-embedding-004
- * with configurable output dimensionality.
+ * Truncate an embedding vector to `dimension` if it is longer, then apply
+ * L2 normalization (unit vector).
+ *
+ * Why this is needed for gemini-embedding-001:
+ *   - The model is configured with `outputDimensionality: 768`, which asks
+ *     Gemini to truncate its native 3072-dim vector to 768 dims for cheaper
+ *     storage / faster similarity. According to Google's current Gemini
+ *     embedding documentation, vectors truncated this way MUST be L2-normalized
+ *     by the caller before being used for cosine similarity.
+ *   - Our RPC (`search_source_chunks`) uses pgvector's `<=>` cosine distance
+ *     operator. For unit-length vectors, cosine distance == 1 - cosine similarity,
+ *     so it returns the expected 0..1 similarity score. With unnormalized
+ *     vectors, scores are biased by magnitude and ranking breaks down.
+ *
+ * This helper is shared with document embeddings written by n8n — the same
+ * normalizeEmbedding() must run there so stored vectors are also unit length.
+ */
+function normalizeEmbedding(values: number[], dimension: number = EMBEDDING_DIMENSION): number[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error('Cannot normalize empty embedding')
+  }
+  const truncated = values.length > dimension ? values.slice(0, dimension) : values
+  let norm = 0
+  for (const v of truncated) norm += v * v
+  norm = Math.sqrt(norm)
+  if (!isFinite(norm) || norm === 0) {
+    throw new Error('Cannot normalize zero-magnitude embedding')
+  }
+  const out = new Array<number>(truncated.length)
+  for (let i = 0; i < truncated.length; i++) out[i] = truncated[i] / norm
+  return out
+}
+
+/**
+ * Generate a 768-dimensional query embedding using Gemini's gemini-embedding-001
+ * (default, override via GEMINI_EMBEDDING_MODEL).
+ *
+ * The function:
+ *   1. Calls the Gemini Embedding API with `outputDimensionality: 768`
+ *      and `taskType: RETRIEVAL_QUERY`.
+ *   2. Truncates to 768 dims if Gemini ever returns a longer vector.
+ *   3. L2-normalizes the result (required for cosine similarity use of
+ *      truncated gemini-embedding-001 vectors).
  *
  * Modular: the call site only depends on the return value (number[]), so the
  * provider can be swapped (e.g. OpenAI, Cohere, Vertex) without changing
- * downstream retrieval logic.
+ * downstream retrieval logic — as long as the new provider's vectors are
+ * also normalized to unit length before storage/comparison.
  */
 async function generateQueryEmbedding(query: string): Promise<number[]> {
   if (!query?.trim()) {
@@ -376,7 +423,7 @@ async function generateQueryEmbedding(query: string): Promise<number[]> {
     content: {
       parts: [{ text: query }],
     },
-    outputDimensionality: 768,
+    outputDimensionality: EMBEDDING_DIMENSION,
     taskType: 'RETRIEVAL_QUERY',
   }
 
@@ -394,11 +441,11 @@ async function generateQueryEmbedding(query: string): Promise<number[]> {
   const data = await res.json()
   const values = data?.embedding?.values
 
-  if (!Array.isArray(values) || values.length !== 768) {
-    throw new Error(`Embedding returned invalid dimensions: ${values?.length ?? 0} (expected 768)`)
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error(`Embedding returned no values (got ${values?.length ?? 0})`)
   }
 
-  return values as number[]
+  return normalizeEmbedding(values as number[])
 }
 
 // ============================================
@@ -416,7 +463,8 @@ interface RetrieveEvidenceOptions {
 
 /**
  * Phase 4 hybrid retrieval:
- *   1. Generate query embedding (Gemini text-embedding-004, 768 dims)
+ *   1. Generate query embedding (Gemini gemini-embedding-001, 768 dims,
+ *      L2-normalized; see generateQueryEmbedding / normalizeEmbedding)
  *   2. Semantic search over source_chunks via search_source_chunks RPC
  *   3. Structured event retrieval via get_festival_events RPC
  *   4. Join chunks back to source records, dedupe

@@ -1,15 +1,24 @@
 -- Buglasan AI - Schema Fixes: Embedding Dimension & Canonical Status Model
 -- Migration: 002_fix_embedding_dimension_and_status_model.sql
 -- Description: Clean replacement migration (pre-production) fixing embedding dimension to 768
---              for Gemini text-embedding-004, implementing canonical status model,
+--              for Gemini gemini-embedding-001, implementing canonical status model,
 --              adding pgvector RPC functions, and hardening RLS.
 --
 -- EMBEDDING MODEL DECISION:
--- Using Google Gemini `text-embedding-004` with `outputDimensionality: 768`
+-- Using Google Gemini `gemini-embedding-001` with `outputDimensionality: 768`
 -- - Stable, production-ready model (not experimental)
 -- - 768 dimensions sufficient for small knowledge base
 -- - Lower storage/compute vs 3072-dim experimental model
 -- - Configurable output dimensionality via API parameter
+--
+-- IMPORTANT — NORMALIZATION:
+-- gemini-embedding-001 returns UNNORMALIZED vectors. Per Google's current
+-- documentation, when the output is truncated (e.g. to 768 dims) for cosine
+-- similarity use, the caller MUST apply L2 normalization (unit vector)
+-- BEFORE storage / before passing into this RPC. Otherwise pgvector's
+-- `<=>` cosine distance will not match expected cosine similarity semantics.
+-- Document embeddings (n8n ingestion) AND query embeddings (Edge Function)
+-- must both be normalized to unit length.
 --
 -- =============================================================================
 -- SOURCE vs EVENT POSTPONEMENT SEMANTICS (IMPORTANT — DO NOT CONFUSE)
@@ -151,16 +160,18 @@ CREATE INDEX idx_sources_year_current_status ON sources(festival_year, is_curren
 
 -- ============================================
 -- SOURCE_CHUNKS TABLE
--- Embedding dimension: 768 (Gemini text-embedding-004)
+-- Embedding dimension: 768 (Gemini gemini-embedding-001)
 -- REMINDER: NO public read policy on this table — embeddings are an
 -- internal implementation detail. service_role bypasses RLS by default.
+-- Vectors MUST be L2-normalized (unit length) at write time — see header
+-- block on gemini-embedding-001 normalization for cosine similarity.
 -- ============================================
 CREATE TABLE source_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding VECTOR(768),  -- pgvector embedding (768 dims for Gemini text-embedding-004)
+    embedding VECTOR(768),  -- pgvector embedding (768 dims, L2-normalized, for Gemini gemini-embedding-001)
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
@@ -265,6 +276,13 @@ CREATE TRIGGER update_events_updated_at
 -- Returns chunks with source metadata, filtered to current-authoritative sources only.
 -- Note: includes status = 'postponed' because a postponed source is CURRENT
 -- evidence about the postponement (see header semantics block).
+--
+-- IMPORTANT: query_embedding MUST be L2-normalized (unit length), and the
+-- stored embeddings MUST also be L2-normalized. gemini-embedding-001 returns
+-- unnormalized vectors; the caller truncates to 768 dims AND applies L2
+-- normalization before calling this RPC or before INSERT into source_chunks.
+-- Without normalization, pgvector's `<=>` cosine distance produces values that
+-- do not match the model's intended cosine similarity.
 CREATE OR REPLACE FUNCTION search_source_chunks(
     query_embedding VECTOR(768),
     target_festival_year INT,

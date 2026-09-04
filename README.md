@@ -143,7 +143,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `SUPABASE_SERVICE_ROLE_KEY`       | Edge fn  | Service role key (server-side only!)             |
 | `GEMINI_API_KEY`                  | Live mode| Google AI Studio API key                         |
 | `GEMINI_MODEL`                    | No       | Override default `gemini-1.5-flash`              |
-| `GEMINI_EMBEDDING_MODEL`          | No       | Override default `text-embedding-004`            |
+| `GEMINI_EMBEDDING_MODEL`          | No       | Override default `gemini-embedding-001`          |
 | `VITE_DEMO_MODE`                  | No       | `true` (default) or `false` to use live backend  |
 | `VITE_DEFAULT_FESTIVAL_YEAR`      | No       | Override current-year default                    |
 | `VITE_TIMEZONE`                   | No       | Default `Asia/Manila`                            |
@@ -334,13 +334,13 @@ Recursive CTE that walks the supersession chain backwards (from updated → supe
 
 ---
 
-## 🤖 Embedding Model: Gemini `text-embedding-004` @ 768 Dimensions
+## 🤖 Embedding Model: Gemini `gemini-embedding-001` @ 768 Dimensions
 
 **Decision documented here and in migration comments.**
 
 | Model | Dimensions | Status | Notes |
 |-------|------------|--------|-------|
-| `text-embedding-004` | 768 (configurable) | **Stable, production** | Chosen — sufficient for small KB, lower storage/compute |
+| `gemini-embedding-001` | 768 (configurable) | **Stable, production** | Chosen — sufficient for small KB, lower storage/compute |
 | `gemini-embedding-exp-03-07` | 3072 (configurable) | Experimental | Higher quality but overkill for this use case |
 
 **Configuration:** `outputDimensionality: 768` passed to Gemini Embedding API.
@@ -371,7 +371,7 @@ User Query
    │
    ▼
 3. Generate query embedding        → generateQueryEmbedding()
-   │  (Gemini text-embedding-004, 768 dims, taskType=RETRIEVAL_QUERY)
+   │  (Gemini gemini-embedding-001, 768 dims, taskType=RETRIEVAL_QUERY)
    │
    ▼
 4. ┌──────────────────────────┐  ┌───────────────────────────┐
@@ -411,7 +411,7 @@ User Query
 async function generateQueryEmbedding(query: string): Promise<number[]>
 ```
 
-- **Model**: `text-embedding-004` (configurable via `GEMINI_EMBEDDING_MODEL`)
+- **Model**: `gemini-embedding-001` (configurable via `GEMINI_EMBEDDING_MODEL`)
 - **Dimensionality**: 768 (configurable; matches DB schema)
 - **Task type**: `RETRIEVAL_QUERY` (better signal than `RETRIEVAL_DOCUMENT` for asymmetric search)
 - **Provider**: Modular — the function is the only seam. Swap to OpenAI/Cohere/Vertex by replacing the implementation; downstream code only depends on the `number[]` return type.
@@ -562,7 +562,7 @@ A planned n8n workflow will automate source ingestion. Contract:
 2. **Fetch**: Scrape post content + metadata
 3. **Normalize**: Clean text, extract events/venues/dates
 4. **Chunk**: Split into ~500 token chunks
-5. **Embed**: Generate vectors via **Gemini `text-embedding-004` with `outputDimensionality: 768`**
+5. **Embed**: Generate vectors via **Gemini `gemini-embedding-001` with `outputDimensionality: 768`**
 6. **Upsert**: Idempotent insert into `sources` and `source_chunks`
 7. **Link**: Create `event_sources` rows based on extraction
 8. **Notify**: Slack/email digest of new content
@@ -730,7 +730,7 @@ When the project reaches production, future migrations will be incremental (ALTE
 
 11-problem audit cycle closed. Final state:
 
-- **Schema** — embedding dim aligned to 768 (Gemini `text-embedding-004`); canonical 6-value `status` enum (`active`/`updated`/`superseded`/`cancelled`/`postponed`/`archived`) with `is_current` as GENERATED column.
+- **Schema** — embedding dim aligned to 768 (Gemini `gemini-embedding-001`); canonical 6-value `status` enum (`active`/`updated`/`superseded`/`cancelled`/`postponed`/`archived`) with `is_current` as GENERATED column.
 - **Retrieval** — `search_source_chunks` + `get_festival_events` + `get_supersession_chain` RPCs; hybrid pipeline (year → temporal → embed → vector + structured join → cap). No silent historical fallback; historical years are explicit-opt-in only.
 - **Year resolution** — defaults to current calendar year in `Asia/Manila`; no October advance.
 - **Demo data** — every demo source prefixed `[DEMO FIXTURE]` and marked synthetic; all response claims derive from fixture sources (no hard-coded strings).
