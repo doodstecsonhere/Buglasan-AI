@@ -255,6 +255,35 @@ Sources use `UNIQUE(platform, post_id)` to prevent duplicates on re-ingestion.
 - `cancelled`, `postponed`, `completed` → `is_current = false`
 - `is_current` GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED
 
+### Source vs Event Postponement Semantics
+
+> ⚠️ **Critical for the n8n ingestion workflow**: the status `'postponed'` is
+> deliberately **asymmetric** between `sources` and `events`. Do not "normalize"
+> or "fix" this — it is correct.
+
+| Where                                | `status = 'postponed'` means | `is_current` |
+| ------------------------------------ | ---------------------------- | ------------ |
+| `sources.status = 'postponed'`       | The **source itself** is a current, authoritative piece of evidence describing the postponement (e.g., a fresh Facebook post "Event moved to Oct 20"). | `true`       |
+| `events.status = 'postponed'`        | The **event** is no longer actively scheduled at its original date/time. It is history; a separate (new) event row with `status = 'scheduled'` or `'confirmed'` and the new date represents the now-scheduled event. | `false`      |
+
+**Why the asymmetry:** source currentness answers *"Is this announcement still
+authoritative right now?"* — yes, a fresh postponement post is. Event
+currentness answers *"Is this event still going to happen as listed?"* — no,
+because it has been moved.
+
+**Code references (must stay in sync):**
+- `isSourceCurrent()` in [`src/types/index.ts`](src/types/index.ts) returns `true` for `'postponed'`.
+- `isEventCurrent()` in [`src/types/index.ts`](src/types/index.ts) returns `false` for `'postponed'`.
+- `CURRENT_SOURCE_STATUSES` in [`src/utils/retrieval.ts`](src/utils/retrieval.ts) includes `'postponed'`.
+- `CURRENT_EVENT_STATUSES` in [`src/utils/retrieval.ts`](src/utils/retrieval.ts) is `['scheduled', 'confirmed']` (no `'postponed'`).
+- `search_source_chunks()` RPC includes `'postponed'` in its filter.
+- `get_festival_events()` RPC filters to `'scheduled', 'confirmed'` only.
+
+**For n8n ingestion:**
+- When a Facebook post announces a postponement, create/update a `sources` row with `status = 'postponed'` (it IS current evidence).
+- When the same post implies an event was moved, set the *old* `events` row's `status = 'postponed'` AND create a *new* `events` row with `status = 'scheduled'` or `'confirmed'` and the new `start_datetime` / `end_datetime`. Do NOT just edit the existing event's date — the postponed row is the audit trail.
+- Never mark a `sources` row as `archived` while it's still the freshest announcement about a postponement; that would hide authoritative current evidence from retrieval.
+
 ### Row Level Security
 
 - ✅ Public read access on `sources`, `events`, `event_sources` (needed for chat)

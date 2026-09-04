@@ -10,6 +10,57 @@
 -- - 768 dimensions sufficient for small knowledge base
 -- - Lower storage/compute vs 3072-dim experimental model
 -- - Configurable output dimensionality via API parameter
+--
+-- =============================================================================
+-- SOURCE vs EVENT POSTPONEMENT SEMANTICS (IMPORTANT — DO NOT CONFUSE)
+-- =============================================================================
+-- The schema deliberately treats "postponed" asymmetrically between sources
+-- and events. This mirrors the application semantics in src/types/index.ts and
+-- src/utils/retrieval.ts and MUST be preserved by any future migration or
+-- n8n ingestion workflow.
+--
+--   sources.status = 'postponed'  →  sources.is_current = TRUE
+--       The source itself is a CURRENT, authoritative piece of evidence about
+--       a postponement. It is fresh, valid, and must be returned by retrieval
+--       pipelines (it tells the user "the event moved to Oct 20").
+--       Evidence: isSourceCurrent() in src/types/index.ts returns true for
+--       'postponed'; CURRENT_SOURCE_STATUSES in src/utils/retrieval.ts
+--       includes 'postponed'; search_source_chunks() RPC filters
+--       status IN ('active', 'updated', 'postponed').
+--
+--   events.status  = 'postponed'  →  events.is_current = FALSE
+--       The event is NO LONGER actively scheduled. It must be excluded from
+--       "upcoming events" lists and from primary retrieval. A fresh event
+--       row (status = 'scheduled' or 'confirmed') with the new date is what
+--       represents the now-scheduled event — the postponed row is history.
+--       Evidence: isEventCurrent() in src/types/index.ts returns false for
+--       'postponed'; CURRENT_EVENT_STATUSES in src/utils/retrieval.ts is
+--       ['scheduled', 'confirmed']; get_festival_events() RPC filters
+--       status IN ('scheduled', 'confirmed').
+--
+-- Why the asymmetry: source currentness describes "is this announcement
+-- still authoritative right now?"; event currentness describes "is this
+-- event still going to happen as listed?". A fresh postponement post is
+-- authoritative; the old scheduled event is not.
+--
+-- =============================================================================
+-- RLS MODEL (SIMPLEST SECURE DEFAULT)
+-- =============================================================================
+-- - sources, events, event_sources: SELECT allowed for anon + authenticated.
+-- - source_chunks: NO anon/authenticated SELECT (embeddings are internal).
+--   service_role bypasses RLS by default in Supabase, so ingestion writes work
+--   without an explicit policy. No public read policy is created for it.
+-- - anon / authenticated: NO INSERT/UPDATE/DELETE policies on ingestion tables.
+--   Under RLS, absence of an applicable policy = denied. We do NOT add
+--   redundant fake "deny" policies.
+-- - service_role: explicit FOR ALL policies are kept because they are
+--   syntactically valid (single command) and provide clear defense-in-depth
+--   documentation, even though service_role bypasses RLS by default.
+--
+-- IMPORTANT: PostgreSQL CREATE POLICY allows ONLY ONE command per policy
+-- (ALL, SELECT, INSERT, UPDATE, or DELETE). A comma-separated command list
+-- such as `FOR INSERT, UPDATE, DELETE` is INVALID syntax and will fail at
+-- apply time. Every policy below uses a single command.
 
 -- ============================================
 -- DROP EXISTING OBJECTS (CLEAN SLATE - PRE-PRODUCTION)
@@ -50,7 +101,9 @@ CREATE EXTENSION IF NOT EXISTS "vector";  -- pgvector for embeddings
 
 -- ============================================
 -- SOURCES TABLE
--- Canonical status model with computed is_current column
+-- Canonical status model with computed is_current column.
+-- REMINDER: sources.status = 'postponed' means the source IS CURRENT
+-- evidence of a postponement (is_current = true). Do not change this.
 -- ============================================
 CREATE TABLE sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -67,7 +120,7 @@ CREATE TABLE sources (
         'updated',     -- Supersedes a previous source; the new authoritative version
         'superseded',  -- Replaced by a newer 'updated' source; preserved for history
         'cancelled',   -- Information explicitly cancelled (event cancelled, announcement withdrawn)
-        'postponed',   -- Information about a postponement; new date may be in another source
+        'postponed',   -- CURRENT evidence of a postponement; is_current = true
         'archived'     -- Historical record from past festival years; not current
     )),
     supersedes_source_id UUID REFERENCES sources(id) ON DELETE SET NULL,
@@ -99,6 +152,8 @@ CREATE INDEX idx_sources_year_current_status ON sources(festival_year, is_curren
 -- ============================================
 -- SOURCE_CHUNKS TABLE
 -- Embedding dimension: 768 (Gemini text-embedding-004)
+-- REMINDER: NO public read policy on this table — embeddings are an
+-- internal implementation detail. service_role bypasses RLS by default.
 -- ============================================
 CREATE TABLE source_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -119,7 +174,9 @@ CREATE INDEX idx_source_chunks_embedding ON source_chunks USING ivfflat (embeddi
 
 -- ============================================
 -- EVENTS TABLE
--- Status aligned with canonical model, is_current as GENERATED column
+-- Status aligned with canonical model, is_current as GENERATED column.
+-- REMINDER: events.status = 'postponed' means the event is NOT currently
+-- scheduled (is_current = false). Excluded from "upcoming events" lists.
 -- ============================================
 CREATE TABLE events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -205,7 +262,9 @@ CREATE TRIGGER update_events_updated_at
 -- ============================================
 
 -- 1. Semantic search over source_chunks for a given festival year
--- Returns chunks with source metadata, filtered to current-authoritative sources only
+-- Returns chunks with source metadata, filtered to current-authoritative sources only.
+-- Note: includes status = 'postponed' because a postponed source is CURRENT
+-- evidence about the postponement (see header semantics block).
 CREATE OR REPLACE FUNCTION search_source_chunks(
     query_embedding VECTOR(768),
     target_festival_year INT,
@@ -243,7 +302,10 @@ CREATE OR REPLACE FUNCTION search_source_chunks(
     LIMIT match_count;
 $$;
 
--- 2. Get structured events for a festival year with optional date/category/status filtering
+-- 2. Get structured events for a festival year with optional date/category/status filtering.
+-- Note: filters to status IN ('scheduled', 'confirmed') only — postponed/cancelled/completed
+-- events are NOT upcoming and must be excluded from "current" event lists
+-- (see header semantics block).
 CREATE OR REPLACE FUNCTION get_festival_events(
     target_festival_year INT,
     start_date TIMESTAMPTZ DEFAULT NULL,
@@ -308,50 +370,62 @@ $$;
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
--- Hardened: Public read on sources, events, event_sources only
--- NO public read on source_chunks (embeddings are implementation detail)
+-- Model:
+--   - sources / events / event_sources: SELECT for anon + authenticated.
+--   - source_chunks: NO anon/authenticated policy (embeddings are internal).
+--     service_role bypasses RLS by default — ingestion writes still work.
+--   - No INSERT/UPDATE/DELETE policies for anon/authenticated on any table.
+--     Under RLS, absence of an applicable policy = denied. We deliberately
+--     do NOT add redundant fake "deny" policies.
+--   - service_role has explicit FOR ALL policies for documentation /
+--     defense-in-depth. Each policy uses a SINGLE command (ALL) which is
+--     valid PostgreSQL syntax.
 -- ============================================
 ALTER TABLE sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE source_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_sources ENABLE ROW LEVEL SECURITY;
 
--- Public read policies (anon key can read) - ONLY for user-facing tables
-CREATE POLICY "Public read access for sources" ON sources
-    FOR SELECT USING (TRUE);
+-- Idempotency: drop new policy names too, so re-running this migration is safe.
+DROP POLICY IF EXISTS "Public read access for sources" ON sources;
+DROP POLICY IF EXISTS "Public read access for events" ON events;
+DROP POLICY IF EXISTS "Public read access for event_sources" ON event_sources;
+DROP POLICY IF EXISTS "Service role full access for sources" ON sources;
+DROP POLICY IF EXISTS "Service role full access for source_chunks" ON source_chunks;
+DROP POLICY IF EXISTS "Service role full access for events" ON events;
+DROP POLICY IF EXISTS "Service role full access for event_sources" ON event_sources;
 
--- NO public read policy for source_chunks - embeddings are internal implementation detail
+-- Public read policies (anon + authenticated) — ONE policy per role per table
+-- so each policy uses a single command (SELECT). Both roles can read sources,
+-- events, and event_sources. source_chunks intentionally has NO public read.
+CREATE POLICY "Public read access for sources" ON sources
+    FOR SELECT TO anon, authenticated USING (TRUE);
+
+-- NO public read policy for source_chunks — embeddings are internal implementation detail.
+-- service_role bypasses RLS by default, so ingestion reads via service_role still work.
 
 CREATE POLICY "Public read access for events" ON events
-    FOR SELECT USING (TRUE);
+    FOR SELECT TO anon, authenticated USING (TRUE);
 
 CREATE POLICY "Public read access for event_sources" ON event_sources
-    FOR SELECT USING (TRUE);
+    FOR SELECT TO anon, authenticated USING (TRUE);
 
--- Service role full access on all tables (for ingestion pipeline)
+-- Service role full access — explicit FOR ALL policies (single command per policy).
+-- service_role bypasses RLS by default in Supabase; these are kept for
+-- defense-in-depth and clarity. Each policy uses a single command (ALL).
 CREATE POLICY "Service role full access for sources" ON sources
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
 CREATE POLICY "Service role full access for source_chunks" ON source_chunks
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
 CREATE POLICY "Service role full access for events" ON events
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
 CREATE POLICY "Service role full access for event_sources" ON event_sources
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
--- Prevent anon/service_role from writing to ingestion tables except via service_role
--- (The above policies already enforce this: only service_role has INSERT/UPDATE/DELETE)
--- Explicitly deny anon write access for clarity
-CREATE POLICY "Deny anon write on sources" ON sources
-    FOR INSERT, UPDATE, DELETE USING (auth.role() = 'service_role');
-
-CREATE POLICY "Deny anon write on source_chunks" ON source_chunks
-    FOR INSERT, UPDATE, DELETE USING (auth.role() = 'service_role');
-
-CREATE POLICY "Deny anon write on events" ON events
-    FOR INSERT, UPDATE, DELETE USING (auth.role() = 'service_role');
-
-CREATE POLICY "Deny anon write on event_sources" ON event_sources
-    FOR INSERT, UPDATE, DELETE USING (auth.role() = 'service_role');
+-- NOTE: No INSERT/UPDATE/DELETE policies for anon or authenticated on any table.
+-- Under RLS, absence of an applicable policy = denied. Explicit deny policies
+-- would be redundant and would risk introducing the same `FOR cmd1, cmd2`
+-- invalid syntax we just fixed.

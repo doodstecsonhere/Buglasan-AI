@@ -9,16 +9,24 @@ export type Platform = 'facebook' | 'instagram' | 'website' | 'pdf' | 'news' | '
 
 /**
  * Canonical Source Status Model
- * 
+ *
  * | Status       | Meaning                                                            | is_current (derived) |
  * | ------------ | ------------------------------------------------------------------ | -------------------- |
  * | `active`     | Current, authoritative announcement for its festival year          | `true`               |
  * | `updated`    | Supersedes a previous source; the new authoritative version        | `true`               |
  * | `superseded` | Replaced by a newer `updated` source; preserved for history        | `false`              |
  * | `cancelled`  | Information explicitly cancelled (event cancelled, withdrawn)      | `false`              |
- * | `postponed`  | Information about a postponement; new date may be in another source| `true`               |
+ * | `postponed`  | CURRENT evidence of a postponement; the source itself is fresh    | `true`               |
  * | `archived`   | Historical record from past festival years; not current            | `false`              |
- * 
+ *
+ * IMPORTANT — source vs event asymmetry (see README "Source vs Event
+ * Postponement Semantics"):
+ *   sources.status = 'postponed'  →  sources.is_current = TRUE
+ *   events.status  = 'postponed'  →  events.is_current  = FALSE
+ * Do not "normalize" this. A fresh postponement post is authoritative
+ * current evidence about the postponement; the (different) postponed event
+ * row is no longer actively scheduled.
+ *
  * `is_current` is a GENERATED ALWAYS AS (status IN ('active', 'updated', 'postponed')) STORED column in DB
  * NOT user-settable - derived from status automatically
  */
@@ -39,7 +47,14 @@ export type EventCategory =
 
 /**
  * Event Status
- * 
+ *
+ * IMPORTANT — source vs event asymmetry (see README "Source vs Event
+ * Postponement Semantics"):
+ *   events.status = 'postponed' → events.is_current = FALSE.
+ *   A postponed event is NO LONGER actively scheduled at its original time;
+ *   the new scheduled event (status = 'scheduled' | 'confirmed') is what
+ *   represents the now-scheduled occurrence. Do not flip this to true.
+ *
  * `is_current` is a GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED column in DB
  * - `scheduled`, `confirmed` → `is_current = true`
  * - `cancelled`, `postponed`, `completed` → `is_current = false`

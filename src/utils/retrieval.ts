@@ -23,7 +23,15 @@ import type { Source, Event, SourceCitation, FestivalYear } from '../types'
 // Constants — keep in sync with src/types/index.ts status model.
 // ---------------------------------------------------------------------------
 
+// CURRENT_SOURCE_STATUSES intentionally includes 'postponed' — a source with
+// status='postponed' IS current evidence of a postponement (the post itself is
+// fresh and authoritative). See README "Source vs Event Postponement Semantics".
 export const CURRENT_SOURCE_STATUSES = ['active', 'updated', 'postponed'] as const
+
+// CURRENT_EVENT_STATUSES deliberately EXCLUDES 'postponed' — an event with
+// status='postponed' is NO LONGER actively scheduled. It is excluded from
+// "upcoming events" / primary retrieval. See README "Source vs Event
+// Postponement Semantics" for the deliberate source/event asymmetry.
 export const CURRENT_EVENT_STATUSES = ['scheduled', 'confirmed'] as const
 
 // ---------------------------------------------------------------------------
