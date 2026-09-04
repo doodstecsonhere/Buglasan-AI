@@ -5,7 +5,7 @@
 [![Built with Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS 4](https://img.shields.io/badge/Tailwind-4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Tailwind CSS 4](https://img.shields.io/badge/Tailwind-4-38B2AC?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
 
 ---
@@ -29,7 +29,22 @@ The AI answers questions in **English, Cebuano/Bisaya, and Filipino/Tagalog**, a
 
 ---
 
+## ⚠️ Demo Data Disclaimer (Synthetic Fixtures)
+
+> **Demo mode uses clearly synthetic fixtures. Real ingestion will replace this data.**
+
+When the app runs with `VITE_DEMO_MODE=true` (the default for development), the chat assistant answers questions using data from [`src/data/demoData.ts`](src/data/demoData.ts). **All of this data is fabricated for demonstration purposes only.** It is not real Buglasan Festival information.
+
+Every `Source.rawText` and `Source.normalizedText` in the demo dataset is prefixed with `[DEMO FIXTURE]` so it can be visually distinguished from real content. Every factual claim (date, venue, organizer, registration deadline, food fair delicacies, history text) is backed by at least one explicit `Source` record, and demo responses derive those claims from the sources rather than from hard-coded strings inside the response generator.
+
+If the demo is asked about something with no backing source (e.g. *"what's the Buglasan 2027 schedule?"* when no 2027 fixtures exist), it returns an honest **"No demo information found"** message rather than fabricating an answer.
+
+The same source-grounding principles apply in production: live responses come from the Supabase `sources` / `events` tables populated by the n8n ingestion pipeline (planned, see [`supabase/functions/chat/index.ts`](supabase/functions/chat/index.ts)). The demo dataset exists only to exercise year resolution, cross-year isolation, supersession handling, temporal filtering, and zero-evidence behavior — not to provide real festival information.
+
+---
+
 ## 🏗️ Architecture
+
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -47,19 +62,19 @@ The AI answers questions in **English, Cebuano/Bisaya, and Filipino/Tagalog**, a
 │         └────────┬────────┘                                  │
 └──────────────────┼──────────────────────────────────────────┘
                    │
-        ┌──────────┴──────────┐
-        │                     │
-┌───────▼────────┐  ┌─────────▼──────────┐
+         ┌──────────┴──────────┐
+         │                     │
+┌────────▼────────┐  ┌─────────▼──────────┐
 │  Demo Dataset  │  │  Supabase Edge     │
 │  (TypeScript)  │  │  Function (chat)   │
 │                │  │  + Gemini API      │
 └────────────────┘  └─────────┬──────────┘
-                              │
-                    ┌─────────▼──────────┐
-                    │  Supabase DB       │
-                    │  (sources, chunks, │
-                    │   events, etc.)    │
-                    └────────────────────┘
+                               │
+                       ┌─────────▼──────────┐
+                       │  Supabase DB       │
+                       │  (sources, chunks, │
+                       │   events, etc.)    │
+                       └────────────────────┘
 ```
 
 ### Tech Stack
@@ -113,7 +128,6 @@ The app starts at `http://localhost:5173` in **demo mode** by default (no backen
 | ----------------- | ------------------------------------------ |
 | `npm run dev`     | Start Vite dev server with HMR             |
 | `npm run build`   | Type-check + production build              |
-| `npm run preview` | Preview production build locally           |
 | `npm run lint`    | Run Oxlint                                 |
 
 ---
@@ -129,6 +143,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `SUPABASE_SERVICE_ROLE_KEY`       | Edge fn  | Service role key (server-side only!)             |
 | `GEMINI_API_KEY`                  | Live mode| Google AI Studio API key                         |
 | `GEMINI_MODEL`                    | No       | Override default `gemini-1.5-flash`              |
+| `GEMINI_EMBEDDING_MODEL`          | No       | Override default `text-embedding-004`            |
 | `VITE_DEMO_MODE`                  | No       | `true` (default) or `false` to use live backend  |
 | `VITE_DEFAULT_FESTIVAL_YEAR`      | No       | Override current-year default                    |
 | `VITE_TIMEZONE`                   | No       | Default `Asia/Manila`                            |
@@ -147,53 +162,61 @@ Buglasan AI solves a common chatbot problem: **hallucinating outdated informatio
 2. **Relative year expressions** (e.g., "last year", "next year")
 3. **Default to current festival year** in Asia/Manila timezone
 
-### Current Festival Year Logic
+### Current Festival Year Logic (Corrected)
 
 ```typescript
 const now = new Date()  // Asia/Manila timezone
-if (now.getMonth() >= 9) {  // October or later
-  currentYear = now.getFullYear() + 1  // Next festival
-} else {
-  currentYear = now.getFullYear()      // This festival
-}
+// ALWAYS return current calendar year
+// Festival occurs in October but year does NOT advance early
+currentYear = now.getFullYear()
 ```
+
+**Key Change:** The festival year now defaults to the **current calendar year in Asia/Manila ALWAYS**, regardless of month.
+
+Examples:
+- September 2026 → default **2026**
+- October 2026 → default **2026** (NOT 2027)
+- November 2026 → default **2026**
+- January 2027 → default **2027**
 
 Festival typically runs **October 15–25**.
 
-### Date Resolution
+### Date Resolution & Temporal Filtering
 
-Handles natural language:
-- "today", "tomorrow", "yesterday"
-- "this weekend", "next weekend"
-- "upcoming", "coming soon"
-- "this week", "next week"
-- Specific dates: "October 19", "10/19/2026"
+Handles natural language temporal expressions with **server-side filtering** before sending to Gemini:
+
+- **Relative dates**: "today", "tomorrow", "yesterday"
+- **Weekends**: "this weekend", "next weekend"
+  - *Edge case*: If today is Saturday/Sunday, "this weekend" = today + tomorrow; if weekday, weekend = upcoming Sat-Sun
+- **Weeks**: "this week", "next week"
+- **Upcoming**: "upcoming", "coming soon", "soon" (next 30 days)
+- **Specific dates**: "October 19", "Oct 19", "19 October", "10/19/2026"
 
 All resolved in **Asia/Manila timezone**.
 
+### Special Query Handling
+
+- **"What can I still register for?" / "Registration deadline"**: Filters events where `deadline >= today` AND `status IN ('scheduled', 'confirmed')`
+- **"Upcoming events"**: Filters events where `start_datetime >= today` AND `status IN ('scheduled', 'confirmed')`
+
 ### Supersession Handling
 
-When an official post is updated (e.g., venue change), the new source is marked:
+When an official post is updated (e.g., venue change), the new source is marked with `status: 'updated'` and `supersedes_source_id` pointing to the old source. The old source gets `status: 'superseded'`.
 
-```sql
-sources.supersedes_source_id = <old_source_id>
-sources.is_current = true
-```
-
-The retrieval engine prefers non-superseded, current sources and clearly notes when info was updated.
+The retrieval engine prefers non-superseded, current-authoritative sources and clearly notes when info was updated.
 
 ---
 
 ## 🗄️ Database Schema
 
-See [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql).
+See [`supabase/migrations/002_fix_embedding_dimension_and_status_model.sql`](supabase/migrations/002_fix_embedding_dimension_and_status_model.sql) (replaces 001).
 
 ### Tables
 
 | Table          | Purpose                                              |
 | -------------- | ---------------------------------------------------- |
 | `sources`      | Ingested source documents (FB posts, websites, PDFs) |
-| `source_chunks`| Chunked content with pgvector embeddings             |
+| `source_chunks`| Chunked content with pgvector embeddings (768 dims)  |
 | `events`       | Structured festival events with year metadata        |
 | `event_sources`| Many-to-many junction with relevance scoring         |
 
@@ -207,10 +230,208 @@ See [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initi
 
 Sources use `UNIQUE(platform, post_id)` to prevent duplicates on re-ingestion.
 
+### Canonical Source Status Model
+
+**One status enum replaces the previous `status` + `is_current` duplication.**
+
+| Status       | Meaning                                                            | is_current (derived) | Use Case |
+| ------------ | ------------------------------------------------------------------ | -------------------- | -------- |
+| `active`     | Current, authoritative announcement for its festival year          | `true`               | Normal current info |
+| `updated`    | Supersedes a previous source; the new authoritative version        | `true`               | Correction/update with lineage |
+| `superseded` | Replaced by a newer `updated` source; preserved for history        | `false`              | Old Facebook post corrected |
+| `cancelled`  | Information explicitly cancelled (event cancelled, announcement withdrawn) | `false`        | Cancelled event notice |
+| `postponed`  | Information about a postponement; the new date may be in another source | `true`           | "Event moved to Oct 20" post |
+| `archived`   | Historical record from past festival years; not current            | `false`              | 2025 sources when querying 2026 |
+
+**Constraints:**
+- `status` NOT NULL DEFAULT `'active'`
+- `supersedes_source_id` UUID REFERENCES sources(id) — only valid when status = `'updated'`
+- `is_current` GENERATED ALWAYS AS (status IN ('active', 'updated', 'postponed')) STORED — **computed column, not user-settable**
+
+### Events Table Status Alignment
+
+`EventStatus` enum kept as-is, with `is_current` as GENERATED:
+- `scheduled`, `confirmed` → `is_current = true`
+- `cancelled`, `postponed`, `completed` → `is_current = false`
+- `is_current` GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED
+
 ### Row Level Security
 
-- ✅ Public read access (anon key)
-- ✅ Service role full access (for ingestion pipeline only)
+- ✅ Public read access on `sources`, `events`, `event_sources` (needed for chat)
+- ❌ **NO public read on `source_chunks`** (embeddings are implementation detail, not user-facing)
+- ✅ Service role full access on all tables (for ingestion pipeline)
+- ✅ Explicit deny policies for anon write access
+
+---
+
+## 🔍 pgvector RPC Functions for Hybrid Retrieval
+
+Three RPC functions provide server-side retrieval logic:
+
+### 1. `search_source_chunks` — Semantic Search
+
+```sql
+search_source_chunks(
+  query_embedding VECTOR(768),
+  target_festival_year INT,
+  match_threshold FLOAT DEFAULT 0.7,
+  match_count INT DEFAULT 10
+)
+```
+
+Returns chunks with source metadata, filtered to **current-authoritative sources only** (`status IN ('active', 'updated', 'postponed')`).
+
+### 2. `get_festival_events` — Structured Event Queries
+
+```sql
+get_festival_events(
+  target_festival_year INT,
+  start_date TIMESTAMPTZ DEFAULT NULL,
+  end_date TIMESTAMPTZ DEFAULT NULL,
+  category_filter TEXT[] DEFAULT NULL,
+  status_filter TEXT[] DEFAULT NULL
+)
+```
+
+Returns events for a festival year with optional date/category/status filtering. Only returns current events (`status IN ('scheduled', 'confirmed')`).
+
+### 3. `get_supersession_chain` — Lineage Resolution
+
+```sql
+get_supersession_chain(source_id UUID)
+```
+
+Recursive CTE that walks the supersession chain backwards (from updated → superseded → superseded...). Returns full chain with `level` depth.
+
+---
+
+## 🤖 Embedding Model: Gemini `text-embedding-004` @ 768 Dimensions
+
+**Decision documented here and in migration comments.**
+
+| Model | Dimensions | Status | Notes |
+|-------|------------|--------|-------|
+| `text-embedding-004` | 768 (configurable) | **Stable, production** | Chosen — sufficient for small KB, lower storage/compute |
+| `gemini-embedding-exp-03-07` | 3072 (configurable) | Experimental | Higher quality but overkill for this use case |
+
+**Configuration:** `outputDimensionality: 768` passed to Gemini Embedding API.
+
+**Rationale:**
+- Small knowledge base (~hundreds of sources, ~thousands of chunks)
+- 768 dimensions provides excellent retrieval quality for this scale
+- 4x less storage vs 3072-dim model
+- Stable model (not experimental) — no breaking changes risk
+- Configurable dimensionality means we can upgrade later if needed
+
+---
+
+## 🧠 Phase 4: Hybrid Retrieval Architecture
+
+The Edge Function's `retrieveEvidence()` implements a query-relevant, year-aware, supersession-safe hybrid retrieval pipeline.
+
+### Flow
+
+```
+User Query
+   │
+   ▼
+1. Resolve festival year           → resolveFestivalYear()        (Phase 3)
+   │
+   ▼
+2. Resolve temporal expressions    → resolveTemporalExpression()  (Phase 3)
+   │
+   ▼
+3. Generate query embedding        → generateQueryEmbedding()
+   │  (Gemini text-embedding-004, 768 dims, taskType=RETRIEVAL_QUERY)
+   │
+   ▼
+4. ┌──────────────────────────┐  ┌───────────────────────────┐
+   │ search_source_chunks RPC │  │ get_festival_events RPC   │
+   │ (vector similarity)      │  │ (structured filter)       │
+   └─────────────┬────────────┘  └──────────┬────────────────┘
+                 │                          │
+                 ▼                          ▼
+8. Filter low-similarity chunks, dedupe by source_id
+   │
+   ▼
+9. Optionally walk supersession chain (only for correction queries)
+   │
+   ▼
+10. Cap: ≤8 sources, ≤15 chunks, ≤10 events
+   │
+   ▼
+11. Format as evidence packet, send to Gemini
+```
+
+### Key Properties
+
+| Property | How it's enforced |
+| -------- | ----------------- |
+| **Year restriction** | RPC `search_source_chunks` and `get_festival_events` both filter by `festival_year` server-side. The Edge Function passes the resolved year as `target_festival_year`. |
+| **Superseded exclusion** | RPC `search_source_chunks` filters `status IN ('active', 'updated', 'postponed')`. `superseded`, `cancelled`, and `archived` sources never reach the prompt as primary evidence. |
+| **No silent historical fallback** | If the resolved year is the default and the RPC returns few results, we return what we have honestly. Historical years are only retrieved when the user explicitly asks (e.g., "2024 schedule"). |
+| **Source deduplication** | Multiple chunks may reference the same source. We keep the highest-similarity chunk per `source_id` and expose a single `Source` record. |
+| **Defense-in-depth similarity filter** | Even though the RPC applies `match_threshold`, the Edge Function also drops chunks with `similarity < 0.7` to keep low-signal results out of the prompt. |
+| **Context-size caps** | Hard caps: `maxSources=8`, `maxChunks=15`, `maxEvents=10`. Prevents prompt bloat and protects the model's context window. |
+| **Optional supersession chain** | Triggered only for explicit correction queries (e.g., "was this changed?", "what was updated?"). Uses `get_supersession_chain` RPC. The chain is included as a separate labeled section, not as primary evidence. |
+
+### Embedding Generation
+
+```typescript
+// supabase/functions/chat/index.ts
+async function generateQueryEmbedding(query: string): Promise<number[]>
+```
+
+- **Model**: `text-embedding-004` (configurable via `GEMINI_EMBEDDING_MODEL`)
+- **Dimensionality**: 768 (configurable; matches DB schema)
+- **Task type**: `RETRIEVAL_QUERY` (better signal than `RETRIEVAL_DOCUMENT` for asymmetric search)
+- **Provider**: Modular — the function is the only seam. Swap to OpenAI/Cohere/Vertex by replacing the implementation; downstream code only depends on the `number[]` return type.
+
+If embedding generation fails, the Edge Function still returns event results (degraded mode) but logs the error and tags the response with `queryEmbeddingUsed=false`.
+
+### Prompt Construction
+
+The final prompt to Gemini has these labeled sections (in order):
+
+1. **System prompt** — identity, principles, language rules
+2. **Current date & resolved year** — `Asia/Manila` time, year, retrieval stats
+3. **Temporal filter annotation** — if a date expression was detected
+4. **Available sources** — deduped, status-tagged, capped at 8
+5. **Semantic chunks** — top 15 by similarity, with similarity scores
+6. **Festival events** — temporal-filtered, capped at 10
+7. **Supersession lineage** — only included for correction queries
+8. **Conversation history** — last 6 messages
+9. **User query**
+10. **Instructions** — citation format, language, no-hallucination rules
+
+### What "Honest Retrieval" Means
+
+We **never** pad the prompt with low-similarity chunks or unrelated sources to make the answer look confident. If `search_source_chunks` returns nothing, the prompt says "No sources matched the query for the resolved festival year." If a chunk has `status='superseded'`, we either exclude it (default) or include it in a labeled lineage section (correction queries) — never as primary evidence.
+
+### Test Coverage
+
+[`supabase/functions/chat/retrieval.test.ts`](supabase/functions/chat/retrieval.test.ts) covers:
+
+- Semantic search returns relevant chunks
+- Year filtering (2026 query → no 2025 sources as current evidence)
+- Superseded exclusion
+- Temporal event filtering
+- Empty result handling
+- Supersession chain resolution
+- Embedding failure fallback
+- Source deduplication
+- Context caps enforced
+- No silent historical fallback
+- `includeHistorical` opt-in for explicit historical queries
+- Correction query triggers chain expansion
+- Low-similarity chunk rejection
+- Category and status filter passing
+
+Run with:
+
+```bash
+deno test --allow-net --allow-env supabase/functions/chat/retrieval.test.ts
+```
 
 ---
 
@@ -263,6 +484,7 @@ Content-Type: application/json
   },
   "retrievedSources": [...],
   "retrievedEvents": [...],
+  "retrievedChunks": [...],
   "yearResolved": 2026,
   "language": "en"
 }
@@ -298,11 +520,12 @@ A planned n8n workflow will automate source ingestion. Contract:
   "published_at": "2026-09-01T10:00:00+08:00",
   "raw_text": "Full post text...",
   "festival_year": 2026,
-  "is_current": true,
   "status": "active",
   "supersedes_source_id": null
 }
 ```
+
+**Note:** `is_current` is no longer in the payload — it's computed from `status` in the database.
 
 ### Pipeline Steps
 
@@ -310,7 +533,7 @@ A planned n8n workflow will automate source ingestion. Contract:
 2. **Fetch**: Scrape post content + metadata
 3. **Normalize**: Clean text, extract events/venues/dates
 4. **Chunk**: Split into ~500 token chunks
-5. **Embed**: Generate vectors via OpenAI/Cohere
+5. **Embed**: Generate vectors via **Gemini `text-embedding-004` with `outputDimensionality: 768`**
 6. **Upsert**: Idempotent insert into `sources` and `source_chunks`
 7. **Link**: Create `event_sources` rows based on extraction
 8. **Notify**: Slack/email digest of new content
@@ -323,7 +546,7 @@ n8n import:workflow --input=./n8n/buglasan-ingestion.json
 
 # Configure credentials in n8n UI
 # - Facebook Graph API
-# - OpenAI / Gemini embeddings
+# - Google Gemini Embeddings
 # - Supabase connection
 ```
 
@@ -365,7 +588,7 @@ Use the **year dropdown** at the top to switch between current, previous, and hi
 ### Typography
 
 - **Display**: Poppins (headings, brand)
-- **Body**: Inter (chat, UI text)
+- **Body**: Inter (chat, UI)
 
 ### Mobile-First
 
@@ -405,9 +628,10 @@ buglasan-ai/
 ├── supabase/
 │   ├── functions/
 │   │   └── chat/              # Edge function
-│   │       └── index.ts
+│   │       ├── index.ts
+│   │       └── retrieval.test.ts
 │   └── migrations/            # SQL migrations
-│       └── 001_initial_schema.sql
+│       └── 002_fix_embedding_dimension_and_status_model.sql
 ├── .env.example               # Environment template
 ├── .gitignore
 ├── index.html
@@ -423,7 +647,7 @@ buglasan-ai/
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome. Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -462,6 +686,35 @@ This project is open source under the [MIT License](LICENSE).
 - **Official Source**: [facebook.com/Buglasan](https://www.facebook.com/Buglasan)
 - **Project Issues**: [GitHub Issues](../../issues)
 - **Author**: Buglasan AI Contributors
+
+---
+
+## 📋 Migration Strategy Note
+
+Since the project has **not entered production**, migration `002_fix_embedding_dimension_and_status_model.sql` is a **clean replacement** (drops and recreates all tables) rather than an incremental ALTER TABLE migration. This avoids technical debt and ensures a clean schema from the start.
+
+When the project reaches production, future migrations will be incremental (ALTER TABLE, CREATE INDEX CONCURRENTLY, etc.).
+
+---
+
+## 🔍 Audit & Hardening Summary (Phase 7)
+
+11-problem audit cycle closed. Final state:
+
+- **Schema** — embedding dim aligned to 768 (Gemini `text-embedding-004`); canonical 6-value `status` enum (`active`/`updated`/`superseded`/`cancelled`/`postponed`/`archived`) with `is_current` as GENERATED column.
+- **Retrieval** — `search_source_chunks` + `get_festival_events` + `get_supersession_chain` RPCs; hybrid pipeline (year → temporal → embed → vector + structured join → cap). No silent historical fallback; historical years are explicit-opt-in only.
+- **Year resolution** — defaults to current calendar year in `Asia/Manila`; no October advance.
+- **Demo data** — every demo source prefixed `[DEMO FIXTURE]` and marked synthetic; all response claims derive from fixture sources (no hard-coded strings).
+- **RPC security** — `source_chunks` no longer publicly readable (embeddings are implementation detail); explicit deny on anon writes; service-role only for ingestion.
+- **Tests** — 117 Vitest client tests + 20 Deno edge-function tests covering year isolation, supersession safety, temporal filtering, source dedup, cap enforcement, zero-evidence behavior, and embedding-failure fallback.
+- **n8n ingestion** — contract documented; **not yet implemented**. Blockers listed below.
+
+### Blockers Before n8n Can Start
+
+1. Apply migration `002_fix_embedding_dimension_and_status_model.sql` to the target Supabase project.
+2. Set Supabase Edge Function secrets: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+3. Configure OAuth / credentials inside n8n: Facebook Graph API (page access token), Google Gemini Embeddings, Supabase service-role connection.
+4. Confirm target Facebook page ID + webhook URL allowlist for the ingestion trigger.
 
 ---
 
