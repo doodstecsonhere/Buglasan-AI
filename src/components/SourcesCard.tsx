@@ -49,7 +49,7 @@ export function SourcesCard({ sources, festivalYear }: SourcesCardProps) {
                         FY {source.festivalYear}
                       </span>
                     )}
-                    {source.isCurrent && (
+                    {(['active','updated','postponed'].includes(source.status)) && (
                       <span className="px-1.5 py-0.5 bg-fiesta-green-light text-fiesta-green-dark rounded text-[10px] font-medium">
                         Current
                       </span>
