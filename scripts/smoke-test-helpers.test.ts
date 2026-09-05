@@ -26,6 +26,7 @@ describe('smoke harness safety helpers', () => {
     expect(() => assertAcceptanceAnswer('October 21, 2026 at 10:00 AM at the Negros Oriental Convention Center.', 2026, 'fixture')).not.toThrow()
     expect(() => assertAcceptanceAnswer('October 16, 2025 at 9 AM at the Negros Oriental Convention Center.', 2025, 'fixture')).not.toThrow()
     expect(() => assertAcceptanceAnswer('No current official information found for 2026.', 2026, 'unavailable')).not.toThrow()
+    expect(() => assertAcceptanceAnswer('No current official information was found for Buglasan Festival 2026. Please check the official Buglasan Festival Facebook Page for verified updates: https://www.facebook.com/Buglasan', 2026, 'unavailable')).not.toThrow()
     expect(() => assertAcceptanceAnswer('Use the October 16, 2025 schedule.', 2026, 'unavailable')).toThrow(/2026|refuse|fall back/)
   })
 })

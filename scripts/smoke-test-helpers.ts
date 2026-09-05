@@ -66,7 +66,7 @@ export function assertAcceptanceAnswer(
 ): void {
   assert(new RegExp(`\\b${expectedYear}\\b`).test(content), `Answer must identify festival year ${expectedYear}`)
   if (mode === 'unavailable') {
-    assert(/no current official information found/i.test(content), 'Unavailable answer must explicitly refuse unsupported current information')
+    assert(/no current official information(?: was)? found/i.test(content), 'Unavailable answer must explicitly refuse unsupported current information')
     assert(!/\b2025\b|Oct(?:ober)?\s+16/i.test(content), 'Unavailable 2026 answer must not fall back to the 2025 fixture')
     return
   }
