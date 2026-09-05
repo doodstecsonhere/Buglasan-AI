@@ -104,7 +104,7 @@ function stripDemoMarker(text: string): string {
  */
 function extractVenueFromSource(source: Source, fallback: string): string {
   if (!source) return fallback
-  const text = stripDemoMarker(source.normalizedText)
+  const text = stripDemoMarker(source.normalizedText ?? source.rawText ?? '')
   const match = text.match(/Venue(?:s)?:\s*([^.\n]+)/i)
   if (match) {
     const raw = match[1].split(/\.\s+Hosts?:/i)[0].trim()
@@ -118,7 +118,7 @@ function extractVenueFromSource(source: Source, fallback: string): string {
  */
 function extractOrganizerFromSource(source: Source, fallback: string): string {
   if (!source) return fallback
-  const text = stripDemoMarker(source.normalizedText)
+  const text = stripDemoMarker(source.normalizedText ?? source.rawText ?? '')
   const match = text.match(/Organizer(?:s)?(?:\s+for[^:]+)?:\s*([^.\n]+)/i)
   if (match) {
     return match[1].trim() || fallback
@@ -273,11 +273,11 @@ class ChatService {
 
       let content = `${lang.supersessionHeader(year)}\n\n`
       for (const sup of updateSources) {
-        content += `🆕 **${stripDemoMarker(sup.normalizedText)}**\n`
+        content += `🆕 **${stripDemoMarker(sup.normalizedText ?? sup.rawText ?? '')}**\n`
         if (sup.supersedesSourceId) {
           const oldSrc = demoSources.find(s => s.id === sup.supersedesSourceId)
           if (oldSrc) {
-            content += `   ↪️ Supersedes: ${stripDemoMarker(oldSrc.normalizedText)}\n`
+            content += `   ↪️ Supersedes: ${stripDemoMarker(oldSrc.normalizedText ?? oldSrc.rawText ?? '')}\n`
           }
         }
         content += '\n'
@@ -295,7 +295,7 @@ class ChatService {
         return `${lang.historyHeader}\n\n${lang.noInfo(year)}\n\n${lang.scheduleNote}`
       }
 
-      let content = `${lang.historyHeader}\n\n${stripDemoMarker(historySource.normalizedText)}\n\n`
+      let content = `${lang.historyHeader}\n\n${stripDemoMarker(historySource.normalizedText ?? historySource.rawText ?? '')}\n\n`
       if (historySource.festivalYear !== year) {
         content += `_(Historical reference from ${historySource.festivalYear})_\n\n`
       }
@@ -305,24 +305,24 @@ class ChatService {
 
     // ---------- Registration demo ----------
     if (wantsRegister) {
-      const regSource = sources.find(s => s.normalizedText.toLowerCase().includes('registration'))
+      const regSource = sources.find(s => (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('registration'))
 
       if (!regSource) {
         return `${lang.registrationHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
       }
 
-      return `${lang.registrationHeader(year)}\n\n${stripDemoMarker(regSource.normalizedText)}\n\n[Source]\n\n${lang.scheduleNote}`
+      return `${lang.registrationHeader(year)}\n\n${stripDemoMarker(regSource.normalizedText ?? regSource.rawText ?? '')}\n\n[Source]\n\n${lang.scheduleNote}`
     }
 
     // ---------- Food fair demo ----------
     if (wantsFood) {
-      const foodSource = sources.find(s => s.normalizedText.toLowerCase().includes('food') || s.normalizedText.toLowerCase().includes('fair'))
+      const foodSource = sources.find(s => (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('food') || (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('fair'))
 
       if (!foodSource) {
         return `${lang.foodHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
       }
 
-      return `${lang.foodHeader(year)}\n\n${stripDemoMarker(foodSource.normalizedText)}\n\n[Source]\n\n${lang.scheduleNote}`
+      return `${lang.foodHeader(year)}\n\n${stripDemoMarker(foodSource.normalizedText ?? foodSource.rawText ?? '')}\n\n[Source]\n\n${lang.scheduleNote}`
     }
 
     // ---------- Upcoming demo (temporal filtering) ----------
@@ -362,7 +362,7 @@ class ChatService {
       for (const evt of events) {
         const venueSrc = getVenueSourceForEvent(evt.id)
         const venueName = venueSrc ? extractVenueFromSource(venueSrc, evt.venue) : evt.venue
-        const marker = isDemoFixture(venueSrc?.normalizedText) ? '🧪' : '📍'
+        const marker = isDemoFixture(venueSrc?.normalizedText ?? undefined) ? '🧪' : '📍'
         content += `${marker} **${evt.eventName}** → ${venueName}\n`
         if (venueSrc) content += `   _(source: ${venueSrc.id})_\n`
         content += '\n'
@@ -444,7 +444,7 @@ class ChatService {
   private toCitation(s: Source): SourceCitation {
     return {
       id: s.id,
-      title: stripDemoMarker(s.normalizedText).substring(0, 100),
+      title: s.title ?? (stripDemoMarker(s.normalizedText ?? s.rawText ?? '').substring(0, 100) || 'Untitled source'),
       platform: s.platform as Platform,
       postUrl: s.postUrl,
       publishedAt: s.publishedAt,
@@ -488,7 +488,7 @@ class ChatService {
   private hydrateSource(s: any): Source {
     return {
       ...s,
-      publishedAt: new Date(s.published_at ?? s.publishedAt),
+      publishedAt: (s.published_at ?? s.publishedAt) ? new Date(s.published_at ?? s.publishedAt) : null,
       ingestedAt: new Date(s.ingested_at ?? s.ingestedAt ?? Date.now()),
       updatedAt: new Date(s.updated_at ?? s.updatedAt ?? Date.now()),
     } as Source
@@ -511,7 +511,7 @@ class ChatService {
 
   getAvailableYears(): FestivalYear[] {
     const years = new Set<FestivalYear>()
-    for (const s of demoSources) years.add(s.festivalYear)
+    for (const s of demoSources) if (s.festivalYear !== null) years.add(s.festivalYear)
     for (const e of demoEvents) years.add(e.festivalYear)
     return Array.from(years).sort((a, b) => b - a)
   }

@@ -33,15 +33,16 @@ import {
 // ---------------------------------------------------------------------------
 
 function makeSource(over: Partial<Source> & { id: string }): Source {
+  const has = <K extends keyof Source>(key: K): boolean => Object.prototype.hasOwnProperty.call(over, key)
   return {
     id: over.id,
     platform: over.platform ?? 'facebook',
     postId: over.postId ?? `post_${over.id}`,
     postUrl: over.postUrl ?? `https://example.test/${over.id}`,
-    publishedAt: over.publishedAt ?? new Date('2026-09-01T10:00:00+08:00'),
-    festivalYear: over.festivalYear ?? 2026,
-    rawText: over.rawText ?? `[fixture] ${over.id}`,
-    normalizedText: over.normalizedText ?? `[fixture] ${over.id}`,
+    publishedAt: has('publishedAt') ? over.publishedAt! : new Date('2026-09-01T10:00:00+08:00'),
+    festivalYear: has('festivalYear') ? over.festivalYear! : 2026,
+    rawText: has('rawText') ? over.rawText! : `[fixture] ${over.id}`,
+    normalizedText: has('normalizedText') ? over.normalizedText! : `[fixture] ${over.id}`,
     status: over.status ?? 'active',
     supersedesSourceId: over.supersedesSourceId,
     ingestedAt: over.ingestedAt ?? new Date('2026-09-01T10:00:00+08:00'),
@@ -112,6 +113,12 @@ describe('filterSourcesByYear', () => {
   it('returns an empty array when no sources match the year', () => {
     const result = filterSourcesByYear(fixtureSources, 2099)
     expect(result).toEqual([])
+  })
+
+  it('never includes a null festival year in exact/current-year scope', () => {
+    const unknown = makeSource({ id: 'unknown-year', festivalYear: null })
+    expect(filterSourcesByYear([unknown], 2026)).toEqual([])
+    expect(getCurrentYearSources([unknown], 2026)).toEqual([])
   })
 
   it('includes sources from other years when target year differs', () => {

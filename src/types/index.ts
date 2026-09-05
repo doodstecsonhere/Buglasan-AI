@@ -6,6 +6,8 @@
 export type FestivalYear = number
 
 export type Platform = 'facebook' | 'instagram' | 'website' | 'pdf' | 'news' | 'official'
+export type SourceType = 'text' | 'image' | 'video' | 'link' | 'mixed' | 'unknown'
+export type CollectionMethod = 'manual' | 'meta_graph_api' | 'admin_export' | 'other'
 
 /**
  * Canonical Source Status Model
@@ -68,10 +70,17 @@ export interface Source {
   platform: Platform
   postId: string
   postUrl: string
-  publishedAt: Date
-  festivalYear: FestivalYear
-  rawText: string
-  normalizedText: string
+  publishedAt: Date | null
+  postYear?: FestivalYear | null
+  festivalYear: FestivalYear | null
+  rawText: string | null
+  normalizedText: string | null
+  title?: string | null
+  sourceType?: SourceType
+  mediaUrls?: string[]
+  collectedAt?: Date
+  collectionMethod?: CollectionMethod
+  sourceMetadata?: Record<string, unknown>
   status: SourceStatus
   supersedesSourceId?: string
   ingestedAt: Date
@@ -134,8 +143,8 @@ export interface SourceCitation {
   title: string
   platform: Platform
   postUrl: string
-  publishedAt: Date
-  festivalYear: FestivalYear
+  publishedAt: Date | null
+  festivalYear: FestivalYear | null
   status: SourceStatus
   supersedesSourceId?: string
   // isCurrent derived from status
@@ -181,8 +190,8 @@ export interface SearchSourceChunksResult {
   content: string
   similarity: number
   sourcePlatform: Platform
-  sourcePublishedAt: Date
-  sourceFestivalYear: FestivalYear
+  sourcePublishedAt: Date | null
+  sourceFestivalYear: FestivalYear | null
   sourceStatus: SourceStatus
   sourceSupersedesSourceId?: string
 }
@@ -209,8 +218,8 @@ export interface GetSupersessionChainResult {
   sourceId: string
   platform: Platform
   postId: string
-  publishedAt: Date
-  festivalYear: FestivalYear
+  publishedAt: Date | null
+  festivalYear: FestivalYear | null
   status: SourceStatus
   supersedesSourceId?: string
   level: number

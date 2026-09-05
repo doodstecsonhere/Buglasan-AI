@@ -58,10 +58,10 @@ interface Source {
   platform: string
   post_id: string
   post_url: string
-  published_at: string
-  festival_year: number
-  raw_text: string
-  normalized_text: string
+  published_at: string | null
+  festival_year: number | null
+  raw_text: string | null
+  normalized_text: string | null
   is_current: boolean
   status: string
   supersedes_source_id?: string
@@ -97,8 +97,8 @@ interface ChunkResult {
   content: string
   similarity: number
   source_platform: string
-  source_published_at: string
-  source_festival_year: number
+  source_published_at: string | null
+  source_festival_year: number | null
   source_status: string
   source_supersedes_source_id?: string
 }
@@ -107,8 +107,8 @@ interface SupersessionChainNode {
   source_id: string
   platform: string
   post_id: string
-  published_at: string
-  festival_year: number
+  published_at: string | null
+  festival_year: number | null
   status: string
   supersedes_source_id?: string
   level: number
@@ -658,7 +658,8 @@ function formatSourcesForPrompt(sources: Source[]): string {
       ? ` (supersedes source ${s.supersedes_source_id.substring(0, 8)}…)`
       : ''
 
-    return `[Source ${i + 1}] ${s.platform.toUpperCase()} | ${date} | FY${s.festival_year} | ${statusTag}${supersedes}\n${s.normalized_text.substring(0, 600)}${s.normalized_text.length > 600 ? '…' : ''}`
+    const text = s.normalized_text ?? s.raw_text ?? '[Non-text source; no extracted text available]'
+    return `[Source ${i + 1}] ${s.platform.toUpperCase()} | ${date} | FY${s.festival_year ?? 'unknown'} | ${statusTag}${supersedes}\n${text.substring(0, 600)}${text.length > 600 ? '…' : ''}`
   }).join('\n\n')
 }
 

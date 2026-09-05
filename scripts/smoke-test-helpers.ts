@@ -34,8 +34,8 @@ export function projectRefFromUrl(value: string): string {
   return match[1]
 }
 
-export function assertLiveSafety(env: NodeJS.ProcessEnv): { projectRef: string } {
-  assert(env.LIVE_RAG_SMOKE_TEST === LIVE_OPT_IN, `Set LIVE_RAG_SMOKE_TEST exactly to ${LIVE_OPT_IN}`)
+export function assertLiveSafety(env: NodeJS.ProcessEnv, optInName = 'LIVE_RAG_SMOKE_TEST'): { projectRef: string } {
+  assert(env[optInName] === LIVE_OPT_IN, `Set ${optInName} exactly to ${LIVE_OPT_IN}`)
   assert(env.SUPABASE_URL, 'SUPABASE_URL is required')
   assert(env.SUPABASE_EXPECTED_PROJECT_REF, 'SUPABASE_EXPECTED_PROJECT_REF is required')
   const projectRef = projectRefFromUrl(env.SUPABASE_URL)

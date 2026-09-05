@@ -249,7 +249,7 @@ export function formatRelativeTime(date: Date, referenceDate?: Date): string {
 /**
  * Check if a source/event is current for the given festival year
  */
-export function isCurrentForYear(item: { festivalYear: FestivalYear; isCurrent: boolean }, targetYear: FestivalYear): boolean {
+export function isCurrentForYear(item: { festivalYear: FestivalYear | null; isCurrent: boolean }, targetYear: FestivalYear): boolean {
   return item.festivalYear === targetYear && item.isCurrent
 }
 
@@ -257,7 +257,7 @@ export function isCurrentForYear(item: { festivalYear: FestivalYear; isCurrent: 
  * Sort sources by relevance: current year first, then by recency, prefer non-superseded
  */
 export function sortSourcesByRelevance(
-  sources: Array<{ festivalYear: FestivalYear; isCurrent: boolean; status: string; publishedAt: Date; supersedesSourceId?: string }>,
+  sources: Array<{ festivalYear: FestivalYear | null; isCurrent: boolean; status: string; publishedAt: Date | null; supersedesSourceId?: string }>,
   targetYear: FestivalYear
 ): typeof sources {
   return [...sources].sort((a, b) => {
@@ -272,6 +272,6 @@ export function sortSourcesByRelevance(
     if (aActive !== bActive) return bActive ? 1 : -1
     
     // Tertiary: more recent first
-    return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+    return (b.publishedAt ? new Date(b.publishedAt).getTime() : 0) - (a.publishedAt ? new Date(a.publishedAt).getTime() : 0)
   })
 }

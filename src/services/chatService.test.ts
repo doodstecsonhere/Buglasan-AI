@@ -70,7 +70,7 @@ describe('ChatService (demo mode)', () => {
     const historySource = demoSources.find((s) => s.id === 'src-history-meaning')
     expect(historySource).toBeDefined()
     // The history source's normalized text (stripped of [DEMO FIXTURE]) should appear
-    const strippedText = historySource!.normalizedText.replace(/\[DEMO FIXTURE\]\s*/g, '').trim()
+    const strippedText = (historySource!.normalizedText ?? historySource!.rawText ?? '').replace(/\[DEMO FIXTURE\]\s*/g, '').trim()
     expect(response.message.content).toContain(strippedText.substring(0, 30))
     // Header should indicate history derivation
     expect(response.message.content.toLowerCase()).toContain('about buglasan')

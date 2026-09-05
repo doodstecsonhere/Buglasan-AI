@@ -13,7 +13,9 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "smoke:rag:live": "node --experimental-strip-types scripts/seed-smoke-test.ts --acceptance",
-    "smoke:rag:cleanup": "node --experimental-strip-types scripts/seed-smoke-test.ts --cleanup"
+    "smoke:rag:cleanup": "node --experimental-strip-types scripts/seed-smoke-test.ts --cleanup",
+    "source:acceptance": "node --experimental-strip-types scripts/source-collector-live.ts --acceptance",
+    "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup"
   },
   "dependencies": {
     "react": "^19.2.8",

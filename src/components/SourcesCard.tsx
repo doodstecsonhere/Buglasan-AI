@@ -43,7 +43,7 @@ export function SourcesCard({ sources, festivalYear }: SourcesCardProps) {
                         {source.platform}
                       </span>
                     </span>
-                    <span>{formatPHDate(source.publishedAt, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <span>{source.publishedAt ? formatPHDate(source.publishedAt, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Publication date unknown'}</span>
                     {source.festivalYear !== festivalYear && (
                       <span className="px-1.5 py-0.5 bg-fiesta-yellow-light text-fiesta-yellow-dark rounded text-[10px] font-medium">
                         FY {source.festivalYear}

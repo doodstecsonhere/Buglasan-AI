@@ -207,7 +207,7 @@ export function getPrimaryEvidence(
 
   const citations: SourceCitation[] = currentSources.map((s) => ({
     id: s.id,
-    title: s.normalizedText.substring(0, 100),
+    title: s.title ?? s.normalizedText?.substring(0, 100) ?? s.rawText?.substring(0, 100) ?? 'Untitled source',
     platform: s.platform,
     postUrl: s.postUrl,
     publishedAt: s.publishedAt,

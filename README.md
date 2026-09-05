@@ -87,7 +87,7 @@ The same source-grounding principles apply in production: live responses come fr
 | Backend      | Supabase (Postgres + Edge Functions)      |
 | AI           | Google Gemini 1.5 Flash                   |
 | Vector Store | pgvector (for semantic search chunks)     |
-| Ingestion    | n8n workflow (planned)                    |
+| Ingestion    | n8n source-only collector workflow        |
 
 ---
 
@@ -535,9 +535,9 @@ To switch language, modify the system prompt or pass `language` in the chat requ
 
 ---
 
-## 🔄 Future: n8n Ingestion Pipeline
+## 🔄 Phase 5: Source Collector
 
-A planned n8n workflow will automate source ingestion. Contract:
+The implemented n8n workflow accepts a canonical payload and calls the service-role-only `ingest_source(jsonb)` RPC. Full semantics, idempotency, security, setup, and fixture instructions are in [`docs/source-ingestion.md`](docs/source-ingestion.md).
 
 ### Webhook Payload
 
@@ -547,36 +547,39 @@ A planned n8n workflow will automate source ingestion. Contract:
   "post_id": "buglasan_2026_xyz",
   "post_url": "https://www.facebook.com/Buglasan/posts/xyz",
   "published_at": "2026-09-01T10:00:00+08:00",
-  "raw_text": "Full post text...",
+  "post_year": null,
   "festival_year": 2026,
-  "status": "active",
-  "supersedes_source_id": null
+  "raw_text": "Full post text...",
+  "normalized_text": "Full post text...",
+  "title": null,
+  "source_type": "text",
+  "media_urls": [],
+  "collected_at": "2026-09-01T10:05:00+08:00",
+  "collection_method": "manual",
+  "source_metadata": {}
 }
 ```
 
-**Note:** `is_current` is no longer in the payload — it's computed from `status` in the database.
+`post_year` is derived from `published_at` when present. `festival_year` is explicit and never inferred.
 
 ### Pipeline Steps
 
-1. **Trigger**: Facebook page webhook / scheduled cron / manual
-2. **Fetch**: Scrape post content + metadata
-3. **Normalize**: Clean text, extract events/venues/dates
-4. **Chunk**: Split into ~500 token chunks
-5. **Embed**: Generate vectors via **Gemini `gemini-embedding-001` with `outputDimensionality: 768`**
-6. **Upsert**: Idempotent insert into `sources` and `source_chunks`
-7. **Link**: Create `event_sources` rows based on extraction
-8. **Notify**: Slack/email digest of new content
+1. **Webhook**: Receive an adapter-produced payload.
+2. **Normalize**: Safely normalize identity/timestamps and derive `post_year`.
+3. **Validate**: Preserve explicit nulls, media arrays, metadata, and raw text.
+4. **RPC**: Atomically insert/update only `sources`.
+5. **Respond**: Return `inserted`, `updated`, or `unchanged`.
+
+Source collection and knowledge extraction are separate. This workflow does not interpret events or create chunks, embeddings, OCR output, or event records.
 
 ### n8n Setup (when ready)
 
 ```bash
 # Import workflow template
-n8n import:workflow --input=./n8n/buglasan-ingestion.json
+n8n import:workflow --input=./n8n/workflows/buglasan-source-collector.json
 
 # Configure credentials in n8n UI
-# - Facebook Graph API
-# - Google Gemini Embeddings
-# - Supabase connection
+# Server environment: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 ```
 
 ---

@@ -568,7 +568,7 @@ export function getPrimarySourcesForEvent(eventId: string): Source[] {
 export function getVenueSourceForEvent(eventId: string): Source | undefined {
   const allBacking = getSourcesForEvent(eventId)
   return allBacking.find(s => s.id.includes('venue-'))
-    ?? allBacking.find(s => s.normalizedText.toLowerCase().includes('venue:'))
+    ?? allBacking.find(s => s.normalizedText?.toLowerCase().includes('venue:'))
 }
 
 /**
@@ -577,5 +577,5 @@ export function getVenueSourceForEvent(eventId: string): Source | undefined {
 export function getOrganizerSourceForEvent(eventId: string): Source | undefined {
   const allBacking = getSourcesForEvent(eventId)
   return allBacking.find(s => s.id.includes('organizer-'))
-    ?? allBacking.find(s => s.normalizedText.toLowerCase().includes('organizer'))
+    ?? allBacking.find(s => s.normalizedText?.toLowerCase().includes('organizer'))
 }

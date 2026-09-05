@@ -1,0 +1,85 @@
+{
+  "name": "Buglasan Source Collector",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "buglasan-source-collector", "responseMode": "responseNode", "options": {} },
+      "id": "b8c43ea8-704c-49a1-bd42-96e794d13f01",
+      "name": "Source Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-720, 0],
+      "webhookId": "buglasan-source-collector"
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $json.body ?? $json; const iso = (v) => v === null ? null : new Date(v).toISOString(); const published = iso(b.published_at); return [{ json: { payload: { platform: b.platform, post_id: typeof b.post_id === 'string' ? b.post_id.trim() : b.post_id, post_url: typeof b.post_url === 'string' ? b.post_url.trim() : b.post_url, published_at: published, post_year: published === null ? b.post_year : new Date(published).getUTCFullYear(), festival_year: b.festival_year, raw_text: b.raw_text, normalized_text: b.normalized_text, title: b.title, source_type: b.source_type, media_urls: b.media_urls, collected_at: iso(b.collected_at), collection_method: b.collection_method, source_metadata: b.source_metadata } } }];"
+      },
+      "id": "0f6b1067-57b0-460b-87d6-502785fef702",
+      "name": "Normalize Canonical Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $json.payload; const required = ['platform','post_id','post_url','published_at','post_year','festival_year','raw_text','normalized_text','title','source_type','media_urls','collected_at','collection_method','source_metadata']; const errors = required.filter(k => !Object.prototype.hasOwnProperty.call(p, k)).map(k => `${k} is required`); if (p.platform !== 'facebook') errors.push('platform must be facebook'); if (typeof p.post_id !== 'string' || !p.post_id) errors.push('post_id must be non-empty'); const http = v => typeof v === 'string' && /^https?:\\/\\//i.test(v); if (!http(p.post_url)) errors.push('post_url must be HTTP(S)'); if (!Array.isArray(p.media_urls) || p.media_urls.some(v => !http(v))) errors.push('media_urls must be an HTTP(S) URL array'); if (!['text','image','video','link','mixed','unknown'].includes(p.source_type)) errors.push('invalid source_type'); if (!['manual','meta_graph_api','admin_export','other'].includes(p.collection_method)) errors.push('invalid collection_method'); if (!p.source_metadata || Array.isArray(p.source_metadata) || typeof p.source_metadata !== 'object') errors.push('source_metadata must be an object'); for (const k of ['post_year','festival_year']) if (p[k] !== null && (!Number.isInteger(p[k]) || p[k] < 1900 || p[k] > 2100)) errors.push(`${k} is invalid`); if (p.raw_text === null && p.normalized_text === null && (!Array.isArray(p.media_urls) || p.media_urls.length === 0) && Object.keys(p.source_metadata ?? {}).length === 0) errors.push('text-null source requires media/provenance'); if (errors.length) throw new Error(`Invalid source payload: ${errors.join('; ')}`); return items;"
+      },
+      "id": "46254cbd-56ad-483f-83f9-68a8a1864003",
+      "name": "Validate Source Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/rpc/ingest_source' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ p_payload: $json.payload }) }}",
+        "options": {}
+      },
+      "id": "cd727b3d-3d33-487e-b259-a0a1d905f304",
+      "name": "Call Source Ingestion RPC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": { "jsCode": "const result = Array.isArray($json) ? $json[0] : $json; if (!result || !['inserted','updated','unchanged'].includes(result.operation) || typeof result.changed !== 'boolean' || typeof result.source_id !== 'string') throw new Error('Unexpected ingest_source response'); return [{ json: result }];" },
+      "id": "ca776447-63f7-4645-9e27-7b50af886505",
+      "name": "Inspect RPC Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ $json }}", "options": { "responseCode": 200 } },
+      "id": "5f88e493-d43c-46de-b783-3fcb7a276106",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [480, 0]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Source Webhook": { "main": [[{ "node": "Normalize Canonical Payload", "type": "main", "index": 0 }]] },
+    "Normalize Canonical Payload": { "main": [[{ "node": "Validate Source Contract", "type": "main", "index": 0 }]] },
+    "Validate Source Contract": { "main": [[{ "node": "Call Source Ingestion RPC", "type": "main", "index": 0 }]] },
+    "Call Source Ingestion RPC": { "main": [[{ "node": "Inspect RPC Result", "type": "main", "index": 0 }]] },
+    "Inspect RPC Result": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "f3bb9efd-da4e-45e9-81be-38066978a23d",
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
