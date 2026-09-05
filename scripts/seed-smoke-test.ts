@@ -125,6 +125,11 @@ async function seed(): Promise<void> {
     id: fixture.sourceId, platform: 'official', post_id: fixture.postId, post_url: fixture.postUrl,
     published_at: fixture.publishedAt, festival_year: fixture.year, raw_text: fixture.text,
     normalized_text: fixture.text, status: 'active', supersedes_source_id: null,
+    post_year: fixture.year, title: fixture.eventName, source_type: 'text', media_urls: [],
+    collected_at: fixture.publishedAt, collection_method: 'manual',
+    source_metadata: { smoke_test: true, fixture_year: fixture.year },
+    // Direct RAG fixtures bypass the collector; do not invent its DB-owned fingerprint.
+    content_fingerprint: null,
   })), 'platform,post_id')
   await upsert('source_chunks', FIXTURES.map((fixture, index) => ({
     id: fixture.chunkId, source_id: fixture.sourceId, chunk_index: 0, content: fixture.text, embedding: embeddings[index],
