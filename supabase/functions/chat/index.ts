@@ -20,6 +20,11 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.21.0'
+import {
+  buildZeroEvidenceFallback,
+  shouldUseZeroEvidenceFallback,
+  type SupportedLanguage,
+} from './grounding.ts'
 
 // ============================================
 // Types
@@ -27,7 +32,7 @@ import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.21.0'
 interface ChatRequest {
   message: string
   festivalYear?: number
-  language?: 'en' | 'ceb' | 'fil'
+  language?: SupportedLanguage
   conversationHistory?: Array<{
     role: 'user' | 'assistant' | 'system'
     content: string
@@ -136,7 +141,7 @@ interface ChatResponse {
   retrievedEvents: Event[]
   retrievedChunks: ChunkResult[]
   yearResolved: number
-  language: 'en' | 'ceb' | 'fil'
+  language: SupportedLanguage
 }
 
 // ============================================
@@ -197,8 +202,8 @@ LANGUAGES:
 
 CURRENT CONTEXT:
 - Timezone: Asia/Manila
-- Festival typically mid-October (15th-25th)
-- Default festival year provided in context`
+- The resolved festival year and current official evidence are provided in context
+- Do not rely on prior knowledge for festival dates, venues, schedules, organizers, traditions, history, or announcement timing`
 
 // ============================================
 // Year & Temporal Resolution
@@ -764,9 +769,6 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
-
     // ---- Year resolution (Phase 3) ----
     const defaultYear = festivalYear || getCurrentFestivalYear()
     const { year: resolvedYear, isExplicit } = resolveFestivalYear(message, defaultYear)
@@ -804,6 +806,35 @@ serve(async (req) => {
         resolveSupersessionChains: isCorrectionQuery,
       }
     )
+
+    // Factual festival questions must never reach the generative model when
+    // retrieval produced no usable official evidence. General conversation
+    // remains model-handled even without evidence.
+    if (shouldUseZeroEvidenceFallback(message, evidence)) {
+      const response: ChatResponse = {
+        message: {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: buildZeroEvidenceFallback(resolvedYear, language),
+          timestamp: new Date().toISOString(),
+          sources: [],
+          festivalYear: resolvedYear,
+        },
+        retrievedSources: [],
+        retrievedEvents: [],
+        retrievedChunks: [],
+        yearResolved: resolvedYear,
+        language,
+      }
+
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     // Build context sections
     const sourcesContext = formatSourcesForPrompt(evidence.sources)
