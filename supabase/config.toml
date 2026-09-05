@@ -1,2 +1,6 @@
+[functions.chat]
+# Publishable API keys are not JWTs; chat is a public endpoint.
+verify_jwt = false
+
 [functions.extract-source]
 verify_jwt = false

@@ -33,7 +33,7 @@ export interface ChatServiceConfig {
   demoMode?: boolean
   edgeFunctionUrl?: string
   supabaseUrl?: string
-  supabaseAnonKey?: string
+  supabasePublishableKey?: string
 }
 
 export interface ChatRequest {
@@ -460,12 +460,13 @@ class ChatService {
 
   private async sendMessageLive(request: ChatRequest): Promise<ChatResponse> {
     const url = this.config.edgeFunctionUrl || EDGE_FUNCTION_URL
+    const publishableKey = this.config.supabasePublishableKey ?? import.meta.env.SUPABASE_PUBLISHABLE_KEY
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(this.config.supabaseAnonKey && { 'Authorization': `Bearer ${this.config.supabaseAnonKey}` }),
+        ...(publishableKey && { apikey: publishableKey }),
       },
       body: JSON.stringify(request),
     })

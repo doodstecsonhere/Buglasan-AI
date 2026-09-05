@@ -42,8 +42,7 @@
         "url": "={{ $env.SUPABASE_URL + '/rest/v1/rpc/ingest_source' }}",
         "sendHeaders": true,
         "headerParameters": { "parameters": [
-          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-          { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SECRET_KEY }}" },
           { "name": "Content-Type", "value": "application/json" }
         ] },
         "sendBody": true,

@@ -36,8 +36,10 @@ describe('source collector workflow security boundary', () => {
       .toEqual(['Call Source Ingestion RPC'])
   })
 
-  it('contains only server-side service-role environment references and no committed credential values', () => {
-    expect(workflowText).toContain('$env.SUPABASE_SERVICE_ROLE_KEY')
+  it('contains only server-side secret-key environment references and no committed credential values', () => {
+    expect(workflowText).toContain('$env.SUPABASE_SECRET_KEY')
+    expect(workflowText).not.toContain('Bearer ')
+    expect(workflowText).not.toMatch(/sb_secret_[A-Za-z0-9_-]+/)
     expect(workflowText).not.toMatch(/service_role\s*[:=]\s*["'][^$]/i)
     expect(workflowText).not.toMatch(/(?:headerAuth|httpHeaderAuth)[\s\S]{0,200}"value"\s*:/i)
   })

@@ -2,7 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { parseModelJson, validateExtractionResult, type ExtractionResult } from '../_shared/extraction.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
-const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}')
+const SERVICE_KEY = secretKeys['default'] ?? ''
 const TRUSTED_TOKEN = Deno.env.get('EXTRACT_SOURCE_TOKEN') ?? ''
 const ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('EXTRACTION_ACCEPTANCE_FIXTURE_TOKEN') ?? ''
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? ''
@@ -30,7 +31,7 @@ function safeGeminiErrorMetadata(result: Response, payload: unknown): Record<str
   }
 }
 
-const headers = { 'content-type': 'application/json', apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}` }
+const headers = { 'content-type': 'application/json', apikey: SERVICE_KEY }
 const response = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
 function constantTimeEqual(actual: string, expected: string): boolean {

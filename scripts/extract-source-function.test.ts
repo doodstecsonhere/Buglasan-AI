@@ -7,7 +7,8 @@ describe('extract-source trust and resilience boundaries', () => {
   it('authenticates with a server secret and never returns the service key', () => {
     expect(code).toContain("request.headers.get('x-extraction-token')")
     expect(code).toContain('constantTimeEqual')
-    expect(code).toContain('SUPABASE_SERVICE_ROLE_KEY')
+    expect(code).toContain('SUPABASE_SECRET_KEYS')
+    expect(code).toContain("secretKeys['default']")
     expect(code).not.toMatch(/response\([^\n]*SERVICE_KEY/)
   })
   it('owns bounded retries for 429/503/timeouts and emits compact statuses', () => {

@@ -15,7 +15,7 @@ const acceptance = args.has('--acceptance')
 assert(cleanupOnly !== acceptance, 'Choose exactly one mode: --acceptance or --cleanup')
 const { projectRef } = assertLiveSafety(process.env, 'LIVE_SOURCE_COLLECTOR_TEST')
 const supabaseUrl = requiredEnv('SUPABASE_URL')
-const serviceKey = requiredEnv('SUPABASE_SERVICE_ROLE_KEY')
+const secretKey = requiredEnv('SUPABASE_SECRET_KEY')
 
 type Json = Record<string, unknown>
 const fixtures = Object.fromEntries(Object.entries(fixturesJson).map(([key, value]) => [key, normalizeSourceIngestionPayload(value)])) as Record<'A' | 'B' | 'C' | 'D' | 'E', SourceIngestionPayload>
@@ -27,7 +27,7 @@ function requiredEnv(name: string): string {
 }
 
 function headers(extra: HeadersInit = {}): HeadersInit {
-  return { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json', ...extra }
+  return { apikey: secretKey, 'Content-Type': 'application/json', ...extra }
 }
 
 async function request(path: string, init: RequestInit): Promise<unknown> {

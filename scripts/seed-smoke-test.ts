@@ -67,20 +67,20 @@ assert(cleanupOnly !== acceptance, 'Choose exactly one mode: --acceptance or --c
 const { projectRef } = assertLiveSafety(process.env)
 
 const supabaseUrl = process.env.SUPABASE_URL!
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_ANON_KEY
+const secretKey = process.env.SUPABASE_SECRET_KEY
+const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY
 const geminiKey = process.env.GEMINI_API_KEY
-assert(serviceKey, 'SUPABASE_SERVICE_ROLE_KEY is required for fixture writes')
+assert(secretKey, 'SUPABASE_SECRET_KEY is required for fixture writes')
 if (acceptance) {
-  assert(anonKey, 'SUPABASE_ANON_KEY (or VITE_SUPABASE_ANON_KEY) is required for the deployed chat call')
+  assert(publishableKey, 'SUPABASE_PUBLISHABLE_KEY is required for the deployed chat call')
   assert(geminiKey, 'GEMINI_API_KEY is required to create RETRIEVAL_DOCUMENT fixtures and verify RPC retrieval')
 }
 
 function headers(key: string, extra: HeadersInit = {}): HeadersInit {
-  return { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', ...extra }
+  return { apikey: key, 'Content-Type': 'application/json', ...extra }
 }
 
-async function request(path: string, init: RequestInit, key = serviceKey!): Promise<unknown> {
+async function request(path: string, init: RequestInit, key = secretKey!): Promise<unknown> {
   const response = await fetch(`${supabaseUrl}${path}`, { ...init, headers: headers(key, init.headers) })
   const text = await response.text()
   if (!response.ok) throw new Error(`Supabase request failed at ${path} (${response.status}): ${text.slice(0, 500)}`)
@@ -151,7 +151,7 @@ async function directRpc(query: string, year: number): Promise<Json[]> {
 async function callChat(message: string, festivalYear?: number): Promise<Json> {
   const body: Json = { message, language: 'en', history: [] }
   if (festivalYear !== undefined) body.festivalYear = festivalYear
-  const result = await request('/functions/v1/chat', { method: 'POST', body: JSON.stringify(body) }, anonKey!)
+  const result = await request('/functions/v1/chat', { method: 'POST', body: JSON.stringify(body) }, publishableKey!)
   assert(result !== null && typeof result === 'object' && !Array.isArray(result), 'Chat response must be an object')
   return result as Json
 }

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 const prefix = 'extraction-test-'
 const mode = process.argv[2]
 const url = process.env.SUPABASE_URL
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const secretKey = process.env.SUPABASE_SECRET_KEY
 const expectedRef = process.env.SUPABASE_EXPECTED_PROJECT_REF
 const optIn = process.env.LIVE_KNOWLEDGE_EXTRACTION_TEST
 const token = process.env.EXTRACT_SOURCE_TOKEN
@@ -14,13 +14,13 @@ type IngestResult = { source_id: string; operation: string; changed: boolean }
 
 function guard(): void {
   if (optIn !== 'I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION') throw new Error('Live knowledge extraction opt-in is not set')
-  if (!url || !serviceKey || !expectedRef || !token) throw new Error('Required server-side environment variable names are not configured')
+  if (!url || !secretKey || !expectedRef || !token) throw new Error('Required server-side environment variable names are not configured')
   const actualRef = new URL(url).hostname.split('.')[0]
   if (actualRef !== expectedRef) throw new Error('SUPABASE_EXPECTED_PROJECT_REF does not match SUPABASE_URL')
 }
 
 async function api(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(`${url}${path}`, { ...init, headers: { apikey: serviceKey!, authorization: `Bearer ${serviceKey}`, 'content-type': 'application/json', ...(init.headers ?? {}) } })
+  return fetch(`${url}${path}`, { ...init, headers: { apikey: secretKey!, 'content-type': 'application/json', ...(init.headers ?? {}) } })
 }
 
 async function cleanup(): Promise<void> {

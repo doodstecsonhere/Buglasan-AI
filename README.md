@@ -141,8 +141,9 @@ Copy `.env.example` to `.env.local` and fill in:
 | Variable                          | Required | Description                                      |
 | --------------------------------- | -------- | ------------------------------------------------ |
 | `VITE_SUPABASE_URL`               | Live mode| Your Supabase project URL                        |
-| `VITE_SUPABASE_ANON_KEY`          | Live mode| Supabase anon/public key                         |
-| `SUPABASE_SERVICE_ROLE_KEY`       | Edge fn  | Service role key (server-side only!)             |
+| `SUPABASE_PUBLISHABLE_KEY`        | Live mode| Public key explicitly exposed by Vite            |
+| `SUPABASE_SECRET_KEY`             | Scripts/n8n | Secret key (trusted server-side only!)        |
+| `SUPABASE_SECRET_KEYS`            | Edge fn  | Hosted JSON dictionary; use the `default` entry  |
 | `GEMINI_API_KEY`                  | Live mode| Google AI Studio API key                         |
 | `GEMINI_MODEL`                    | No       | Override default `gemini-flash-latest`            |
 | `GEMINI_EMBEDDING_MODEL`          | No       | Override default `gemini-embedding-001`          |
@@ -479,14 +480,17 @@ supabase login
 # Link to your project
 supabase link --project-ref your-project-ref
 
-# Deploy the chat function
-supabase functions deploy chat
+# Deploy the public chat function (publishable API keys are not JWTs)
+supabase functions deploy chat --no-verify-jwt
 
 # Set secrets
 supabase secrets set GEMINI_API_KEY=your_key_here
-supabase secrets set SUPABASE_URL=your_url_here
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_key_here
+# Supabase automatically provides SUPABASE_URL and SUPABASE_SECRET_KEYS.
+# Both Edge Functions read the default entry in SUPABASE_SECRET_KEYS.
+# Do not upload the local SUPABASE_SECRET_KEY to hosted Edge Functions.
 ```
+
+The browser sends `SUPABASE_PUBLISHABLE_KEY` in the `apikey` header, not as a bearer JWT. Vite explicitly exposes only this public key; never prefix a secret key with `VITE_` or expose the full server environment. Trusted scripts and n8n send `SUPABASE_SECRET_KEY` in `apikey`. Database roles and permissions are unchanged.
 
 ### Request Format
 
@@ -581,7 +585,7 @@ Source collection and knowledge extraction are separate. This workflow does not 
 n8n import:workflow --input=./n8n/workflows/buglasan-source-collector.json
 
 # Configure credentials in n8n UI
-# Server environment: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+# Server environment: SUPABASE_URL and SUPABASE_SECRET_KEY
 ```
 
 ---
@@ -746,8 +750,8 @@ When the project reaches production, future migrations will be incremental (ALTE
 ### Blockers Before n8n Can Start
 
 1. Apply migration `002_fix_embedding_dimension_and_status_model.sql` to the target Supabase project.
-2. Set Supabase Edge Function secrets: `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
-3. Configure OAuth / credentials inside n8n: Facebook Graph API (page access token), Google Gemini Embeddings, Supabase service-role connection.
+2. Set the Supabase Edge Function secret `GEMINI_API_KEY`; hosted `SUPABASE_URL` and `SUPABASE_SECRET_KEYS` are automatically provided.
+3. Configure OAuth / credentials inside n8n: Facebook Graph API (page access token), Google Gemini Embeddings, Supabase secret-key connection.
 4. Confirm target Facebook page ID + webhook URL allowlist for the ingestion trigger.
 
 ---

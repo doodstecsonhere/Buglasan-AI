@@ -156,7 +156,8 @@ const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
 const GEMINI_EMBEDDING_MODEL = Deno.env.get('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-001'
 const EMBEDDING_DIMENSION = 768
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS')!)
+const secretKey = secretKeys['default']
 
 const PH_TIMEZONE = 'Asia/Manila'
 
@@ -769,7 +770,7 @@ serve(async (req) => {
       })
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    const supabase = createClient(SUPABASE_URL, secretKey)
     // ---- Year resolution (Phase 3) ----
     const defaultYear = festivalYear || getCurrentFestivalYear()
     const { year: resolvedYear, isExplicit } = resolveFestivalYear(message, defaultYear)
