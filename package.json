@@ -15,7 +15,10 @@
     "smoke:rag:live": "node --experimental-strip-types scripts/seed-smoke-test.ts --acceptance",
     "smoke:rag:cleanup": "node --experimental-strip-types scripts/seed-smoke-test.ts --cleanup",
     "source:acceptance": "node --experimental-strip-types scripts/source-collector-live.ts --acceptance",
-    "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup"
+    "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup",
+    "extraction:acceptance": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --acceptance",
+    "extraction:cleanup": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --cleanup",
+    "check:extraction-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-knowledge-extractor.json'));JSON.parse(require('fs').readFileSync('test/fixtures/extraction-test-cases.json'));console.log('Extraction JSON valid')\""
   },
   "dependencies": {
     "react": "^19.2.8",

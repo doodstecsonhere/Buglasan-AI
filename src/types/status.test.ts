@@ -7,9 +7,9 @@
  *   - isEventCurrent()   : scheduled / confirmed → true
  *   - isEventCurrent()   : cancelled / postponed / completed → false
  *
- * These helpers mirror the DB-level GENERATED ALWAYS AS columns:
- *   sources.is_current = status IN ('active', 'updated', 'postponed')
- *   events.is_current  = status IN ('scheduled', 'confirmed')
+ * The source helper mirrors its DB-generated column. The event helper preserves
+ * the status-derived domain default, while Phase 6 migration 007 makes the DB's
+ * events.is_current independently writable for prior-fingerprint audit rows.
  *
  * If you change the canonical status model, change these tests too.
  */

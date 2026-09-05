@@ -57,9 +57,12 @@ export type EventCategory =
  *   the new scheduled event (status = 'scheduled' | 'confirmed') is what
  *   represents the now-scheduled occurrence. Do not flip this to true.
  *
- * `is_current` is a GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED column in DB
- * - `scheduled`, `confirmed` → `is_current = true`
- * - `cancelled`, `postponed`, `completed` → `is_current = false`
+ * `isEventCurrent` retains the status-derived domain default:
+ * - `scheduled`, `confirmed` → current
+ * - `cancelled`, `postponed`, `completed` → not current
+ * Since Phase 6 migration 007, the DB's events.is_current column is independently
+ * writable so an older extraction fingerprint can be retained as non-current audit
+ * history without changing its status. Runtime types and helper behavior are unchanged.
  */
 export type EventStatus = 'scheduled' | 'confirmed' | 'cancelled' | 'postponed' | 'completed'
 

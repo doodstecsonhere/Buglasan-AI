@@ -130,6 +130,8 @@ The app starts at `http://localhost:5173` in **demo mode** by default (no backen
 | `npm run build`   | Type-check + production build              |
 | `npm run lint`    | Run Oxlint                                 |
 
+Phase 6 evidence-grounded event extraction is documented in [`docs/knowledge-extraction.md`](docs/knowledge-extraction.md). It is a separate, inactive n8n Workflow B and does not add chunks or embeddings.
+
 ---
 
 ## 🔐 Environment Variables
@@ -142,7 +144,7 @@ Copy `.env.example` to `.env.local` and fill in:
 | `VITE_SUPABASE_ANON_KEY`          | Live mode| Supabase anon/public key                         |
 | `SUPABASE_SERVICE_ROLE_KEY`       | Edge fn  | Service role key (server-side only!)             |
 | `GEMINI_API_KEY`                  | Live mode| Google AI Studio API key                         |
-| `GEMINI_MODEL`                    | No       | Override default `gemini-1.5-flash`              |
+| `GEMINI_MODEL`                    | No       | Override default `gemini-flash-latest`            |
 | `GEMINI_EMBEDDING_MODEL`          | No       | Override default `gemini-embedding-001`          |
 | `VITE_DEMO_MODE`                  | No       | `true` (default) or `false` to use live backend  |
 | `VITE_DEFAULT_FESTIVAL_YEAR`      | No       | Override current-year default                    |
@@ -250,10 +252,10 @@ Sources use `UNIQUE(platform, post_id)` to prevent duplicates on re-ingestion.
 
 ### Events Table Status Alignment
 
-`EventStatus` enum kept as-is, with `is_current` as GENERATED:
-- `scheduled`, `confirmed` → `is_current = true`
-- `cancelled`, `postponed`, `completed` → `is_current = false`
-- `is_current` GENERATED ALWAYS AS (status IN ('scheduled', 'confirmed')) STORED
+`EventStatus` remains unchanged. For ordinary event rows, application helpers derive currentness from status:
+- `scheduled`, `confirmed` → current
+- `cancelled`, `postponed`, `completed` → not current
+- Since Phase 6 migrations 007–008, `events.is_current` is independently writable and synchronized from canonical status; extractor-derived rows additionally stay non-current when their fingerprint is no longer the source's active fingerprint. This permits old audit rows without stale retrieval state.
 
 ### Source vs Event Postponement Semantics
 
@@ -733,7 +735,7 @@ When the project reaches production, future migrations will be incremental (ALTE
 
 11-problem audit cycle closed. Final state:
 
-- **Schema** — embedding dim aligned to 768 (Gemini `gemini-embedding-001`); canonical 6-value `status` enum (`active`/`updated`/`superseded`/`cancelled`/`postponed`/`archived`) with `is_current` as GENERATED column.
+- **Schema** — embedding dim aligned to 768 (Gemini `gemini-embedding-001`); canonical 6-value source `status` enum (`active`/`updated`/`superseded`/`cancelled`/`postponed`/`archived`). `sources.is_current` remains generated; Phase 6 migrations 007–008 make `events.is_current` writable for extraction audit history while synchronizing it from event status and active source fingerprint.
 - **Retrieval** — `search_source_chunks` + `get_festival_events` + `get_supersession_chain` RPCs; hybrid pipeline (year → temporal → embed → vector + structured join → cap). No silent historical fallback; historical years are explicit-opt-in only.
 - **Year resolution** — defaults to current calendar year in `Asia/Manila`; no October advance.
 - **Demo data** — every demo source prefixed `[DEMO FIXTURE]` and marked synthetic; all response claims derive from fixture sources (no hard-coded strings).

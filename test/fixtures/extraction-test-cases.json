@@ -1,0 +1,11 @@
+[
+  {"id":"extraction-test-A-complete","source":"Buglasan Dance Showdown 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park. Admission is FREE.","expect":"extracted"},
+  {"id":"extraction-test-B-partial","source":"Join the Buglasan Art Fair at Freedom Park. More details soon.","expect":"extracted"},
+  {"id":"extraction-test-C-explicit-year","source":"Published December 2026. Buglasan Parade 2027 happens October 20, 2027.","expect":"extracted"},
+  {"id":"extraction-test-D-ambiguous-year","source":"The Buglasan Night will happen this October 18.","expect":"needs_review"},
+  {"id":"extraction-test-E-no-event","source":"Thank you to everyone who supports Negros Oriental culture.","expect":"no_event"},
+  {"id":"extraction-test-F-fees","source":"Workshop admission is FREE. Concert ticket details are not announced.","expect":"extracted"},
+  {"id":"extraction-test-G-cancelled","source":"The Buglasan Food Fair is CANCELLED due to weather.","expect":"needs_review"},
+  {"id":"extraction-test-H-multi-event","source":"Parade is October 18, 2027. Concert is October 19, 2027.","expect":"extracted"},
+  {"id":"extraction-test-I-malformed-ambiguous","source":"Maybe Fest @ somewhere, perhaps Oct 18? See htp://bad url.","expect":"needs_review"}
+]

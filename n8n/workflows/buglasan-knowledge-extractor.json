@@ -1,0 +1,55 @@
+{
+  "name": "Buglasan Knowledge Extractor (Workflow B)",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "source-id-trigger",
+      "name": "Trusted Source ID Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": { "httpMethod": "POST", "path": "buglasan-knowledge-extractor", "authentication": "headerAuth", "responseMode": "lastNode", "options": {} },
+      "credentials": { "httpHeaderAuth": { "id": "configure-after-import", "name": "Buglasan extraction webhook token" } }
+    },
+    {
+      "id": "extract-source-call",
+      "name": "Call Trusted Extract Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/functions/v1/extract-source' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-extraction-token", "value": "={{ $env.EXTRACT_SOURCE_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { source_id: $json.body.source_id } }}",
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
+      }
+    },
+    {
+      "id": "status-branch",
+      "name": "Branch on Result Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [520, 0],
+      "parameters": {
+        "rules": { "values": [
+          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "extracted", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "extracted" },
+          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "no_event", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "no_event" },
+          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "needs_review", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "needs_review" },
+          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "retryable_error", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "retryable_error" }
+        ] },
+        "options": { "fallbackOutput": "extra" }
+      }
+    }
+  ],
+  "connections": {
+    "Trusted Source ID Trigger": { "main": [[{ "node": "Call Trusted Extract Source", "type": "main", "index": 0 }]] },
+    "Call Trusted Extract Source": { "main": [[{ "node": "Branch on Result Status", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "tags": []
+}
