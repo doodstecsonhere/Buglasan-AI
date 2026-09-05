@@ -375,15 +375,51 @@ RETURNS TABLE (
     supersedes_source_id UUID,
     level INT
 ) LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    WITH RECURSIVE chain AS (
-        SELECT s.*, 0 AS level FROM sources s WHERE s.id = source_id
+    WITH RECURSIVE chain (
+        source_id,
+        platform,
+        post_id,
+        published_at,
+        festival_year,
+        status,
+        supersedes_source_id,
+        level
+    ) AS (
+        SELECT
+            s.id,
+            s.platform,
+            s.post_id,
+            s.published_at,
+            s.festival_year,
+            s.status,
+            s.supersedes_source_id,
+            0
+        FROM sources s
+        WHERE s.id = get_supersession_chain.source_id
         UNION ALL
-        SELECT s.*, c.level + 1
+        SELECT
+            s.id,
+            s.platform,
+            s.post_id,
+            s.published_at,
+            s.festival_year,
+            s.status,
+            s.supersedes_source_id,
+            c.level + 1
         FROM sources s
         JOIN chain c ON s.id = c.supersedes_source_id
         WHERE c.level < 10  -- safety limit to prevent infinite recursion
     )
-    SELECT * FROM chain;
+    SELECT
+        chain.source_id,
+        chain.platform,
+        chain.post_id,
+        chain.published_at,
+        chain.festival_year,
+        chain.status,
+        chain.supersedes_source_id,
+        chain.level
+    FROM chain;
 $$;
 
 -- ============================================
