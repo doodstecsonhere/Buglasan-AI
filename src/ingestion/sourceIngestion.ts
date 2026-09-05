@@ -41,6 +41,10 @@ const EXPECTED_KEYS = new Set<keyof SourceIngestionPayload>([
 const MIN_YEAR = 1900
 const MAX_YEAR = 2100
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/
+const MANILA_YEAR = new Intl.DateTimeFormat('en-US-u-ca-gregory', {
+  timeZone: 'Asia/Manila',
+  year: 'numeric',
+})
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -126,8 +130,8 @@ export function normalizeSourceIngestionPayload(input: unknown): SourceIngestion
     throw new SourceIngestionValidationError(issues)
   }
 
-  // Published timestamp owns post_year. festival_year is never inferred.
-  const postYear = publishedAt === null ? input.post_year as number | null : new Date(publishedAt).getUTCFullYear()
+  // Published timestamp owns post_year in the festival's civil timezone. festival_year is never inferred.
+  const postYear = publishedAt === null ? input.post_year as number | null : Number(MANILA_YEAR.format(new Date(publishedAt)))
 
   return {
     platform: 'facebook',

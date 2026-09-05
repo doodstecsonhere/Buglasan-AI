@@ -15,7 +15,7 @@ All keys are required so unknown values are explicit `null`, not omitted.
 | `platform` | Exactly `facebook` in Phase 5. |
 | `post_id` / `post_url` | Stable Facebook identity; non-empty ID and HTTP(S) URL. |
 | `published_at` | RFC 3339 timestamp with timezone, or `null` when unavailable. |
-| `post_year` | Publication calendar year. With `published_at`, client and DB override it with the timestamp's UTC year; otherwise a 1900–2100 integer or `null` is preserved. |
+| `post_year` | Publication calendar year in `Asia/Manila`. With `published_at`, canonical TypeScript and the DB override it with the timestamp's Manila civil year; otherwise a 1900–2100 integer or `null` is preserved. |
 | `festival_year` | Explicit festival year, 1900–2100 integer or `null`; never inferred from publication date or text. |
 | `raw_text` | Original text preserved exactly, or `null`. |
 | `normalized_text` | Adapter-supplied normalized text or `null`; not synthesized here. |
@@ -48,10 +48,12 @@ The RPC is `SECURITY DEFINER` with fixed search path and UTC timezone. Execution
 
 ## n8n
 
-Import `n8n/workflows/buglasan-source-collector.json`. Configure server environment variables `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no secret values are exported. The nodes are Webhook → Normalize → Validate → HTTP RPC → Inspect → Respond. Secure the webhook before activation. A future Meta/admin adapter may feed or replace the webhook while preserving this boundary.
+Import `n8n/workflows/buglasan-source-collector.json`. Configure server environment variables `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no secret values are exported. The nodes are Webhook → Normalize → Validate → HTTP RPC → Inspect → Respond. The exported workflow is deliberately inactive and its webhook uses n8n Header Auth, referenced as `Buglasan Source Collector Header Auth`, before any node that can access the service-role-backed RPC.
+
+One-time setup: in n8n, create a **Header Auth** credential with a private, randomly generated header name/value agreed with the authorized caller, then select that credential on **Source Webhook** (replace/resolve the imported reference if n8n prompts). Store the value only in n8n's credential store and the authorized caller's secret store—never in workflow JSON, environment documentation, logs, browser code, or this repository. Verify an unauthenticated request is rejected by n8n and an authenticated test request reaches validation before considering activation. **Do not activate this workflow until the Header Auth credential and both server-side Supabase variables are configured and the unauthorized-request check passes.** Never place the Supabase service-role key in the inbound credential; callers receive only the separate webhook credential.
 
 ## Fixture acceptance and cleanup
 
 The live harness requires variable names `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_EXPECTED_PROJECT_REF`, and explicit `LIVE_SOURCE_COLLECTOR_TEST`. It never prints credential values and rejects project-ref mismatch.
 
-After migration 003 is applied in a separately approved remote step, run `npm run source:acceptance`; use `npm run source:cleanup` for separate cleanup. Tests 1–6 insert A, replay A with collection-time noise, insert/verify B–D, then edit A with E. The harness checks RPC operations, count, UUID/initial timestamp, nulls, year separation, image media, fingerprints, and edit timestamp. Its `finally` cleanup deletes only four fixed `ingestion-test-` identities and never touches chunks or events.
+After migrations through 005 are applied, run `npm run source:acceptance`; use `npm run source:cleanup` for separate cleanup. Tests 1–6 insert A, replay A with collection-time noise, insert/verify B–D, then edit A with E. The harness checks RPC operations, count, UUID/initial timestamp, nulls, year separation, image media, fingerprints, and edit timestamp. Its `finally` cleanup deletes only four fixed `ingestion-test-` identities and never touches chunks or events.

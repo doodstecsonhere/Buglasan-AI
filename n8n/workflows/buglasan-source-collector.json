@@ -2,17 +2,23 @@
   "name": "Buglasan Source Collector",
   "nodes": [
     {
-      "parameters": { "httpMethod": "POST", "path": "buglasan-source-collector", "responseMode": "responseNode", "options": {} },
+      "parameters": { "httpMethod": "POST", "path": "buglasan-source-collector", "authentication": "headerAuth", "responseMode": "responseNode", "options": {} },
       "id": "b8c43ea8-704c-49a1-bd42-96e794d13f01",
       "name": "Source Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [-720, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "buglasan-source-collector-header-auth",
+          "name": "Buglasan Source Collector Header Auth"
+        }
+      },
       "webhookId": "buglasan-source-collector"
     },
     {
       "parameters": {
-        "jsCode": "const b = $json.body ?? $json; const iso = (v) => v === null ? null : new Date(v).toISOString(); const published = iso(b.published_at); return [{ json: { payload: { platform: b.platform, post_id: typeof b.post_id === 'string' ? b.post_id.trim() : b.post_id, post_url: typeof b.post_url === 'string' ? b.post_url.trim() : b.post_url, published_at: published, post_year: published === null ? b.post_year : new Date(published).getUTCFullYear(), festival_year: b.festival_year, raw_text: b.raw_text, normalized_text: b.normalized_text, title: b.title, source_type: b.source_type, media_urls: b.media_urls, collected_at: iso(b.collected_at), collection_method: b.collection_method, source_metadata: b.source_metadata } } }];"
+        "jsCode": "const b = $json.body ?? $json; const iso = (v) => v === null ? null : new Date(v).toISOString(); const published = iso(b.published_at); const manilaYear = (v) => Number(new Intl.DateTimeFormat('en-US-u-ca-gregory', { timeZone: 'Asia/Manila', year: 'numeric' }).format(new Date(v))); return [{ json: { payload: { platform: b.platform, post_id: typeof b.post_id === 'string' ? b.post_id.trim() : b.post_id, post_url: typeof b.post_url === 'string' ? b.post_url.trim() : b.post_url, published_at: published, post_year: published === null ? b.post_year : manilaYear(published), festival_year: b.festival_year, raw_text: b.raw_text, normalized_text: b.normalized_text, title: b.title, source_type: b.source_type, media_urls: b.media_urls, collected_at: iso(b.collected_at), collection_method: b.collection_method, source_metadata: b.source_metadata } } }];"
       },
       "id": "0f6b1067-57b0-460b-87d6-502785fef702",
       "name": "Normalize Canonical Payload",

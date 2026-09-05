@@ -10,6 +10,21 @@ describe('normalizeSourceIngestionPayload', () => {
     expect(result.festival_year).toBe(2027)
   })
 
+  it.each([
+    ['2027-01-01T00:30:00+08:00', 2027],
+    ['2027-01-01T00:30:00+09:00', 2026],
+    ['2026-12-31T16:30:00Z', 2027],
+  ])('derives the Asia/Manila post year for New Year boundary %s', (publishedAt, expectedYear) => {
+    const result = normalizeSourceIngestionPayload({
+      ...fixtures.B,
+      published_at: publishedAt,
+      post_year: 2000,
+      festival_year: 2030,
+    })
+    expect(result.post_year).toBe(expectedYear)
+    expect(result.festival_year).toBe(2030)
+  })
+
   it('tolerates a missing publication timestamp and preserves valid nullable years', () => {
     const result = normalizeSourceIngestionPayload(fixtures.C)
     expect(result.published_at).toBeNull()
