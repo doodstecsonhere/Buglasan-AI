@@ -1,0 +1,70 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+const harness = readFileSync('scripts/orchestration-live.ts', 'utf8')
+const migration = readFileSync('supabase/migrations/014_pipeline_acceptance_cleanup.sql', 'utf8').toLowerCase()
+const cleanup = readFileSync('supabase/functions/cleanup-pipeline-acceptance/index.ts', 'utf8')
+const semanticIdentityMigration = readFileSync('supabase/migrations/015_return_semantic_source_identity.sql', 'utf8')
+const liveHarness = readFileSync('scripts/orchestration-live.ts', 'utf8')
+const chatFunction = readFileSync('supabase/functions/chat/index.ts', 'utf8')
+const packageManifest = readFileSync('package.json', 'utf8')
+
+describe('Phase 9 trusted pipeline acceptance contract', () => {
+  it('requires exact production-write opt-in, project ref, and independent tokens', () => {
+    expect(harness).toContain("LIVE_PIPELINE_ACCEPTANCE_TEST !== 'I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION'")
+    expect(harness).toContain('SUPABASE_EXPECTED_PROJECT_REF does not match SUPABASE_URL')
+    expect(harness).toContain('Pipeline fixture token must differ from worker tokens')
+  })
+  it('loads the live harness through Node env-file without a shell wrapper or embedded secret', () => {
+    expect(packageManifest).toContain('"pipeline:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --acceptance"')
+    expect(packageManifest).toContain('"pipeline:diagnostic-chat": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --diagnostic-chat"')
+    expect(packageManifest).not.toContain('export ')
+    expect(packageManifest).not.toContain('I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION')
+    expect(harness).toContain("LIVE_PIPELINE_ACCEPTANCE_TEST !== 'I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION'")
+  })
+  it('uses fixed fixtures and deployed interfaces rather than inactive webhooks', () => {
+    for (const id of ['pipeline-test-01-current', 'pipeline-test-10-canonical', 'pipeline-test-batch-a', 'pipeline-test-batch-c']) expect(harness).toContain(id)
+    for (const endpoint of ['ingest_source', 'extract-source', 'index-source', 'reconcile-event', '/functions/v1/chat']) expect(harness).toContain(endpoint)
+    expect(harness).toContain('intentionally inactive')
+  })
+  it('keeps cleanup service-only, exact scoped, and rejects shared graphs', () => {
+    expect(migration).toContain("auth.role() <> 'service_role'")
+    expect(migration).toContain("source_metadata->>'pipeline_acceptance_fixture' <> 'phase9-v1'")
+    expect(migration).toContain('refusing shared canonical graph')
+    expect(migration).not.toContain('p_fixture_ids')
+    expect(cleanup).toContain('x-pipeline-acceptance-fixture-token')
+    expect(cleanup).toContain('difference |=')
+    expect(migration).toContain('event_candidate_associations')
+    expect(migration).toContain('canonical_event_field_history')
+    expect(migration).toContain('candidate_ids uuid[]')
+  })
+  it('checks the deployed nested chat citation contract with fixture identity and official link', () => {
+    expect(harness).toContain('chatBody.message')
+    expect(harness).toContain("source.postId === 'pipeline-test-10-canonical'")
+    expect(harness).toContain('www.facebook.com/NegrosOrientalProvincialGovernment')
+  })
+  it('preserves safe non-2xx chat diagnostics instead of discarding the response body', () => {
+    expect(liveHarness).toContain('readSafeHttpFailure')
+    expect(liveHarness).toContain('response.text()')
+    expect(liveHarness).toContain('contentType')
+    expect(liveHarness).toContain('category')
+    expect(liveHarness).toContain('requestId')
+    expect(liveHarness).toContain('chat failed: ${JSON.stringify(failure)}')
+  })
+  it('requires structured safe chat runtime classification without exposing exception text', () => {
+    expect(chatFunction).toContain('classifyChatError')
+    for (const category of ['rpc_contract_error', 'provider_unavailable', 'provider_configuration_error', 'provider_error', 'internal_error']) expect(chatFunction).toContain(category)
+    expect(chatFunction).toContain('requestId')
+    expect(chatFunction).not.toContain("message: error instanceof Error ? error.message")
+  })
+  it('keeps official source identity in semantic retrieval results for chat citations', () => {
+    expect(semanticIdentityMigration).toContain('DROP FUNCTION IF EXISTS public.search_source_chunks')
+    expect(semanticIdentityMigration).toContain('pg_catalog.pg_depend')
+    expect(semanticIdentityMigration).toContain('CREATE FUNCTION public.search_source_chunks')
+    expect(semanticIdentityMigration).not.toContain('CREATE OR REPLACE FUNCTION public.search_source_chunks')
+    expect(semanticIdentityMigration).toContain('source_post_id TEXT')
+    expect(semanticIdentityMigration).toContain('source_post_url TEXT')
+    expect(semanticIdentityMigration).toContain('s.post_id')
+    expect(semanticIdentityMigration).toContain('s.post_url')
+  })
+})

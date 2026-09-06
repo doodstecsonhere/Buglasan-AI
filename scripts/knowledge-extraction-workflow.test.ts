@@ -15,10 +15,13 @@ describe('Workflow B artifact', () => {
     expect(workflow.nodes[0].credentials.httpHeaderAuth.id).toBe('configure-after-import')
   })
   it('calls once and branches statuses without nested retry nodes', () => {
-    expect(workflow.nodes.filter((node: { type: string }) => node.type === 'n8n-nodes-base.httpRequest')).toHaveLength(1)
+    expect(workflow.nodes.filter((node: { name: string }) => node.name === 'Call Trusted Extract Source Once')).toHaveLength(1)
     for (const status of ['extracted','no_event','needs_review','retryable_error']) expect(raw).toContain(status)
     expect(raw).not.toMatch(/retryOnFail|loopOverItems|splitInBatches/)
-    expect(workflow.nodes[1].parameters.options.response.response.neverError).toBe(true)
+    const extractCall = workflow.nodes.find((node: { name: string }) => node.name === 'Call Trusted Extract Source Once')
+    expect(extractCall.parameters.options.response.response.neverError).toBe(true)
+    expect(raw).toContain('Get Safe Candidate Dispatch Plan')
+    expect(raw).toContain('Dispatch Workflow D Per Candidate')
   })
   it('has gateway and live-harness regression configuration', () => {
     const config = readFileSync(new URL('../supabase/config.toml', import.meta.url), 'utf8')

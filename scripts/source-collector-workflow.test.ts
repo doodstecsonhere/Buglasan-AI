@@ -34,6 +34,8 @@ describe('source collector workflow security boundary', () => {
     expect(workflow.nodes.filter((node) => node.type === 'n8n-nodes-base.webhook')).toHaveLength(1)
     expect(workflow.connections['Validate Source Contract']?.main.flat().map(({ node }) => node))
       .toEqual(['Call Source Ingestion RPC'])
+    expect(workflow.connections['Inspect RPC Result']?.main.flat().map(({ node }) => node))
+      .toEqual(['Prepare Dispatch Request'])
   })
 
   it('contains only server-side secret-key environment references and no committed credential values', () => {
@@ -42,5 +44,6 @@ describe('source collector workflow security boundary', () => {
     expect(workflowText).not.toMatch(/sb_secret_[A-Za-z0-9_-]+/)
     expect(workflowText).not.toMatch(/service_role\s*[:=]\s*["'][^$]/i)
     expect(workflowText).not.toMatch(/(?:headerAuth|httpHeaderAuth)[\s\S]{0,200}"value"\s*:/i)
+    expect(workflowText).toContain('N8N_INTERNAL_ORCHESTRATION_TOKEN')
   })
 })

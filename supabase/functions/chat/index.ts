@@ -44,6 +44,7 @@ interface ChatRequest {
 
 interface SourceCitation {
   id: string
+  postId: string
   title: string
   platform: string
   postUrl: string
@@ -98,6 +99,8 @@ interface ChunkResult {
   content: string
   similarity: number
   source_platform: string
+  source_post_id: string
+  source_post_url: string
   source_published_at: string | null
   source_festival_year: number | null
   source_status: string
@@ -522,8 +525,8 @@ async function retrieveEvidence(
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, limits.maxChunks)
 
-  // Build Source records from chunk metadata. Because the RPC already joins
-  // chunks to sources, we have enough to construct minimal Source objects.
+  // Build Source records from chunk metadata. The RPC includes official source
+  // identity so semantic citations remain attributable and linkable.
   // For text fields, the chunk content is the best signal we have on hand
   // without an extra round-trip; we tag them as "via-chunk" for transparency.
   const sourceById = new Map<string, Source>()
@@ -532,8 +535,8 @@ async function retrieveEvidence(
     sourceById.set(c.source_id, {
       id: c.source_id,
       platform: c.source_platform,
-      post_id: '', // Not returned by RPC; client uses chunk content for citation
-      post_url: '',
+      post_id: c.source_post_id,
+      post_url: c.source_post_url,
       published_at: c.source_published_at,
       festival_year: c.source_festival_year,
       raw_text: c.content,
@@ -585,6 +588,16 @@ async function retrieveEvidence(
       chainsExpanded,
     },
   }
+}
+
+function classifyChatError(error: unknown): { category: string; code: string } {
+  const message = error instanceof Error ? error.message : String(error)
+  const lower = message.toLowerCase()
+  if (lower.includes('rpc') || lower.includes('function public.') || lower.includes('does not exist')) return { category: 'rpc_contract_error', code: 'retrieval_rpc_failed' }
+  if (!GEMINI_API_KEY || lower.includes('api key') || lower.includes('unauthorized') || lower.includes('permission')) return { category: 'provider_configuration_error', code: 'provider_credentials' }
+  if (lower.includes('429') || /\b(500|502|503|504)\b/.test(lower) || lower.includes('timeout') || lower.includes('fetch failed')) return { category: 'provider_unavailable', code: 'provider_transport' }
+  if (lower.includes('generatecontent') || lower.includes('model')) return { category: 'provider_error', code: 'generation_request' }
+  return { category: 'internal_error', code: 'unclassified_runtime_error' }
 }
 
 // ============================================
@@ -669,6 +682,7 @@ function extractCitations(response: string, sources: Source[]): SourceCitation[]
       const s = sources[idx]
       citations.push({
         id: s.id,
+        postId: s.post_id,
         title: s.normalized_text.substring(0, 100),
         platform: s.platform,
         postUrl: s.post_url,
@@ -881,11 +895,15 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (error) {
-    console.error('Chat function error:', error)
+    const classification = classifyChatError(error)
+    const requestId = crypto.randomUUID()
+    console.error('Chat function error', { requestId, category: classification.category, code: classification.code })
     return new Response(
       JSON.stringify({
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
+        category: classification.category,
+        code: classification.code,
+        requestId,
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

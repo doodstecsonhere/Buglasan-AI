@@ -55,6 +55,8 @@ interface ChunkResult {
   content: string
   similarity: number
   source_platform: string
+  source_post_id: string
+  source_post_url: string
   source_published_at: string
   source_festival_year: number
   source_status: string
@@ -272,8 +274,8 @@ async function retrieveEvidence(
     sourceById.set(c.source_id, {
       id: c.source_id,
       platform: c.source_platform,
-      post_id: '',
-      post_url: '',
+      post_id: c.source_post_id,
+      post_url: c.source_post_url,
       published_at: c.source_published_at,
       festival_year: c.source_festival_year,
       raw_text: c.content,
@@ -329,6 +331,8 @@ function mkChunk(over: Partial<ChunkResult>): ChunkResult {
     content: 'default content',
     similarity: 0.85,
     source_platform: 'facebook',
+    source_post_id: 'official-post-id',
+    source_post_url: 'https://www.facebook.com/NegrosOrientalProvincialGovernment/posts/official-post-id',
     source_published_at: '2026-09-01T10:00:00+08:00',
     source_festival_year: 2026,
     source_status: 'active',
@@ -387,6 +391,19 @@ Deno.test('retrieval: semantic search returns relevant chunks for query', async 
   assert(result.sources.some((s) => s.id === sourceId))
   assertEquals(result.queryEmbeddingUsed, true)
   assertEquals(lastRpcCall?.name, 'get_festival_events')
+})
+
+Deno.test('retrieval: semantic sources retain official identity for citations', async () => {
+  resetMocks()
+  const supabase = makeMockSupabase()
+  rpcChunks = [mkChunk({
+    source_id: 'canonical-source',
+    source_post_id: 'pipeline-test-10-canonical',
+    source_post_url: 'https://www.facebook.com/NegrosOrientalProvincialGovernment/posts/pipeline-test-10-canonical',
+  })]
+  const result = await retrieveEvidence(supabase, 2026, 'canonical schedule')
+  assertEquals(result.sources[0].post_id, 'pipeline-test-10-canonical')
+  assertEquals(result.sources[0].post_url, 'https://www.facebook.com/NegrosOrientalProvincialGovernment/posts/pipeline-test-10-canonical')
 })
 
 Deno.test('retrieval: year filtering — 2026 query cannot use 2025 sources as current', async () => {

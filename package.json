@@ -24,7 +24,15 @@
     "check:indexing-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-semantic-indexer.json'));console.log('Semantic indexing JSON valid')\"",
     "reconciliation:acceptance": "node --experimental-strip-types scripts/event-reconciliation-live.ts --acceptance",
     "reconciliation:cleanup": "node --experimental-strip-types scripts/event-reconciliation-live.ts --cleanup",
-    "check:reconciliation-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-event-reconciler.json'));console.log('Event reconciliation JSON valid')\""
+    "check:reconciliation-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-event-reconciler.json'));console.log('Event reconciliation JSON valid')\"",
+    "check:orchestration-json": "node -e \"for(const f of ['n8n/workflows/buglasan-source-collector.json','n8n/workflows/buglasan-knowledge-extractor.json','n8n/workflows/buglasan-semantic-indexer.json','n8n/workflows/buglasan-event-reconciler.json'])JSON.parse(require('fs').readFileSync(f));console.log('Orchestration JSON valid')\"",
+    "pipeline:status": "node --experimental-strip-types scripts/orchestration-status.ts",
+    "orchestration:status": "npm run pipeline:status",
+    "orchestration:live": "node --experimental-strip-types scripts/orchestration-live.ts",
+    "orchestration:acceptance": "node --experimental-strip-types scripts/orchestration-live.ts --acceptance",
+    "pipeline:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --acceptance",
+    "pipeline:diagnostic-chat": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --diagnostic-chat",
+    "pipeline:cleanup": "node --experimental-strip-types scripts/orchestration-live.ts --cleanup"
   },
   "dependencies": {
     "react": "^19.2.8",

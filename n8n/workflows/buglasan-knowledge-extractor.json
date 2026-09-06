@@ -3,53 +3,17 @@
   "active": false,
   "settings": { "executionOrder": "v1" },
   "nodes": [
-    {
-      "id": "source-id-trigger",
-      "name": "Trusted Source ID Trigger",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [0, 0],
-      "parameters": { "httpMethod": "POST", "path": "buglasan-knowledge-extractor", "authentication": "headerAuth", "responseMode": "lastNode", "options": {} },
-      "credentials": { "httpHeaderAuth": { "id": "configure-after-import", "name": "Buglasan extraction webhook token" } }
-    },
-    {
-      "id": "extract-source-call",
-      "name": "Call Trusted Extract Source",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [260, 0],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.SUPABASE_URL + '/functions/v1/extract-source' }}",
-        "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "x-extraction-token", "value": "={{ $env.EXTRACT_SOURCE_TOKEN }}" }] },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { source_id: $json.body.source_id } }}",
-        "options": { "timeout": 30000, "response": { "response": { "neverError": true } } }
-      }
-    },
-    {
-      "id": "status-branch",
-      "name": "Branch on Result Status",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3.2,
-      "position": [520, 0],
-      "parameters": {
-        "rules": { "values": [
-          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "extracted", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "extracted" },
-          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "no_event", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "no_event" },
-          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "needs_review", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "needs_review" },
-          { "conditions": { "conditions": [{ "leftValue": "={{ $json.status }}", "rightValue": "retryable_error", "operator": { "type": "string", "operation": "equals" } }] }, "renameOutput": true, "outputKey": "retryable_error" }
-        ] },
-        "options": { "fallbackOutput": "extra" }
-      }
-    }
+    {"id":"source-id-trigger","name":"Trusted Source ID Trigger","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"parameters":{"httpMethod":"POST","path":"buglasan-knowledge-extractor","authentication":"headerAuth","responseMode":"responseNode","options":{}},"credentials":{"httpHeaderAuth":{"id":"configure-after-import","name":"Buglasan extraction webhook token"}}},
+    {"id":"validate","name":"Validate Exact Source ID","type":"n8n-nodes-base.code","typeVersion":2,"position":[220,0],"parameters":{"jsCode":"const b=$json.body??$json;if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).length!==1||typeof b.source_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.source_id)) return [];return [{json:{source_id:b.source_id}}];"}},
+    {"id":"extract-source-call","name":"Call Trusted Extract Source Once","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[440,0],"parameters":{"method":"POST","url":"={{ $env.SUPABASE_URL + '/functions/v1/extract-source' }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"x-extraction-token","value":"={{ $env.EXTRACT_SOURCE_TOKEN }}"}]},"sendBody":true,"specifyBody":"json","jsonBody":"={{ { source_id: $json.source_id } }}","options":{"timeout":95000,"response":{"response":{"neverError":true,"responseFormat":"json"}}}}},
+    {"id":"normalize-status","name":"Normalize Safe Extraction Status","type":"n8n-nodes-base.code","typeVersion":2,"position":[660,0],"parameters":{"jsCode":"const r=$json.body??$json;const status=typeof r?.status==='string'?r.status:'permanent_error';return [{json:{status,accepted:true,candidate_event_ids:[],has_more_candidates:false,remaining_candidate_count:0}}];"}},
+    {"id":"status-branch","name":"Branch on Result Status","type":"n8n-nodes-base.switch","typeVersion":3.2,"position":[860,0],"parameters":{"rules":{"values":[{"conditions":{"conditions":[{"leftValue":"={{ $json.status }}","rightValue":"extracted","operator":{"type":"string","operation":"equals"}}]}},{"conditions":{"conditions":[{"leftValue":"={{ $json.status }}","rightValue":"no_event","operator":{"type":"string","operation":"equals"}}]}},{"conditions":{"conditions":[{"leftValue":"={{ $json.status }}","rightValue":"needs_review","operator":{"type":"string","operation":"equals"}}]}},{"conditions":{"conditions":[{"leftValue":"={{ $json.status }}","rightValue":"retryable_error","operator":{"type":"string","operation":"equals"}}]}}]},"options":{"fallbackOutput":"extra"}}},
+    {"id":"dispatch-plan","name":"Get Safe Candidate Dispatch Plan","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[900,0],"parameters":{"method":"POST","url":"={{ $env.SUPABASE_URL + '/rest/v1/rpc/get_orchestration_dispatch' }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"apikey","value":"={{ $env.SUPABASE_SECRET_KEY }}"},{"name":"Content-Type","value":"application/json"}]},"sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{ JSON.stringify({p_source_id:$node['Validate Exact Source ID'].json.source_id,p_changed:false}) }}","options":{"response":{"response":{"responseFormat":"json"}}}}},
+    {"id":"validate-dispatch-plan","name":"Validate Candidate Dispatch Plan","type":"n8n-nodes-base.code","typeVersion":2,"position":[1080,0],"parameters":{"jsCode":"const p=$json.body??$json;if(!p||typeof p!=='object'||Array.isArray(p)||typeof p.source_id!=='string'||!Array.isArray(p.candidate_event_ids)||!p.candidate_event_ids.every(id=>typeof id==='string'&&/^[0-9a-f-]{36}$/i.test(id))||typeof p.has_more_candidates!=='boolean'||!Number.isInteger(p.remaining_candidate_count)||p.remaining_candidate_count<0)throw new Error('Malformed orchestration dispatch plan');return [{json:{...p,status:'extracted',accepted:true}}];"}},
+    {"id":"respond","name":"Respond Compact Status","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.4,"position":[1260,-100],"parameters":{"respondWith":"json","responseBody":"={{ { status: $json.status, accepted: $json.accepted, candidate_dispatch_count: $json.candidate_event_ids.length, has_more_candidates: $json.has_more_candidates, remaining_candidate_count: $json.remaining_candidate_count } }}"}},
+    {"id":"candidate-items","name":"Emit Safe Current Candidate IDs","type":"n8n-nodes-base.code","typeVersion":2,"position":[1260,80],"parameters":{"jsCode":"return $json.candidate_event_ids.map(candidate_event_id=>({json:{candidate_event_id}}));"}},
+    {"id":"reconcile","name":"Dispatch Workflow D Per Candidate","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[1480,80],"parameters":{"method":"POST","url":"={{ $env.N8N_INTERNAL_BASE_URL + '/webhook/buglasan-event-reconcile' }}","sendHeaders":true,"headerParameters":{"parameters":[{"name":"x-internal-orchestration-token","value":"={{ $env.N8N_INTERNAL_ORCHESTRATION_TOKEN }}"}]},"sendBody":true,"contentType":"raw","rawContentType":"application/json","body":"={{JSON.stringify({candidate_event_id:$json.candidate_event_id})}}","options":{"timeout":1000,"response":{"response":{"neverError":true,"responseFormat":"json"}}}}}
   ],
-  "connections": {
-    "Trusted Source ID Trigger": { "main": [[{ "node": "Call Trusted Extract Source", "type": "main", "index": 0 }]] },
-    "Call Trusted Extract Source": { "main": [[{ "node": "Branch on Result Status", "type": "main", "index": 0 }]] }
-  },
-  "pinData": {},
-  "tags": []
+  "connections":{"Trusted Source ID Trigger":{"main":[[{"node":"Validate Exact Source ID","type":"main","index":0}]]},"Validate Exact Source ID":{"main":[[{"node":"Call Trusted Extract Source Once","type":"main","index":0}]]},"Call Trusted Extract Source Once":{"main":[[{"node":"Normalize Safe Extraction Status","type":"main","index":0}]]},"Normalize Safe Extraction Status":{"main":[[{"node":"Branch on Result Status","type":"main","index":0}]]},"Branch on Result Status":{"main":[[{"node":"Get Safe Candidate Dispatch Plan","type":"main","index":0}],[{"node":"Respond Compact Status","type":"main","index":0}],[{"node":"Respond Compact Status","type":"main","index":0}],[{"node":"Respond Compact Status","type":"main","index":0}],[{"node":"Respond Compact Status","type":"main","index":0}]]},"Get Safe Candidate Dispatch Plan":{"main":[[{"node":"Validate Candidate Dispatch Plan","type":"main","index":0}]]},"Validate Candidate Dispatch Plan":{"main":[[{"node":"Respond Compact Status","type":"main","index":0},{"node":"Emit Safe Current Candidate IDs","type":"main","index":0}]]},"Respond Compact Status":{"main":[[]]},"Emit Safe Current Candidate IDs":{"main":[[{"node":"Dispatch Workflow D Per Candidate","type":"main","index":0}]]},"Dispatch Workflow D Per Candidate":{"main":[[]]}},
+  "pinData":{},"tags":[]
 }

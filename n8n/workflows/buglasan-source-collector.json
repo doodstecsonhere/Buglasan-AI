@@ -66,12 +66,60 @@
       "position": [240, 0]
     },
     {
-      "parameters": { "respondWith": "json", "responseBody": "={{ $json }}", "options": { "responseCode": 200 } },
+      "parameters": { "jsCode": "const r=$json;return [{json:{source_id:r.source_id,changed:r.changed}}];" },
+      "id": "e7b8caac-5d63-4e45-91f9-630eecf4606b",
+      "name": "Prepare Dispatch Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, -100]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.SUPABASE_URL + '/rest/v1/rpc/get_orchestration_dispatch' }}", "sendHeaders": true, "headerParameters": { "parameters": [{ "name": "apikey", "value": "={{ $env.SUPABASE_SECRET_KEY }}" }, { "name": "Content-Type", "value": "application/json" }] }, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ JSON.stringify({p_source_id:$json.source_id,p_changed:$json.changed}) }}", "options": { "response": { "response": { "responseFormat": "json" } } } },
+      "id": "a9b4c25c-3e22-4731-98d4-21d5b5fcf6a3",
+      "name": "Get Orchestration Dispatch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -100]
+    },
+    {
+      "parameters": { "jsCode": "const p=$json.body??$json;if(!p||typeof p!=='object'||Array.isArray(p)||typeof p.source_id!=='string'||typeof p.extraction!=='boolean'||typeof p.indexing!=='boolean'||!Array.isArray(p.candidate_event_ids)||!p.candidate_event_ids.every(id=>typeof id==='string'&&/^[0-9a-f-]{36}$/i.test(id))||typeof p.has_more_candidates!=='boolean'||!Number.isInteger(p.remaining_candidate_count)||p.remaining_candidate_count<0)throw new Error('Malformed orchestration dispatch plan');return [{json:{source_id:p.source_id,extraction:p.extraction,indexing:p.indexing,candidate_event_ids:p.candidate_event_ids,has_more_candidates:p.has_more_candidates,remaining_candidate_count:p.remaining_candidate_count}}];" },
+      "id": "a7638a07-61d3-4de4-8d92-9a9034a6e220",
+      "name": "Validate Dispatch Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, -100]
+    },
+    {
+      "parameters": { "jsCode": "return $json.candidate_event_ids.map(candidate_event_id=>({json:{candidate_event_id}}));" },
+      "id": "95434961-82b8-4a58-9106-6f637b7dd494", "name": "Emit Recoverable Candidate IDs", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [900, 120]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.N8N_INTERNAL_BASE_URL + '/webhook/buglasan-event-reconcile' }}", "sendHeaders": true, "headerParameters": { "parameters": [{ "name": "x-internal-orchestration-token", "value": "={{ $env.N8N_INTERNAL_ORCHESTRATION_TOKEN }}" }] }, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{JSON.stringify({candidate_event_id:$json.candidate_event_id})}}", "options": { "timeout": 95000, "response": { "response": { "neverError": true, "responseFormat": "json" } } } },
+      "id": "7b83321f-4ef0-4c4e-ae8d-a0bbe11a3493", "name": "Dispatch Workflow D Recovery", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1120, 120]
+    },
+    {
+      "parameters": { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{$json.extraction}}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] } },
+      "id": "a1f274b9-aaf7-4914-b0e4-62c5cb7e67c7", "name": "Dispatch Extraction?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [1120, -160]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.N8N_INTERNAL_BASE_URL + '/webhook/buglasan-knowledge-extractor' }}", "sendHeaders": true, "headerParameters": { "parameters": [{ "name": "x-internal-orchestration-token", "value": "={{ $env.N8N_INTERNAL_ORCHESTRATION_TOKEN }}" }] }, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{JSON.stringify({source_id:$json.source_id})}}", "options": { "timeout": 95000, "response": { "response": { "neverError": true, "responseFormat": "json" } } } },
+      "id": "38f3d437-e815-4f0a-8cdd-f7c58c25c720", "name": "Dispatch Workflow B", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1340, -220]
+    },
+    {
+      "parameters": { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{$json.indexing}}", "rightValue": true, "operator": { "type": "boolean", "operation": "true" } }] } },
+      "id": "9c09f904-1d53-4d75-9842-e4cb14db5f8c", "name": "Dispatch Indexing?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [1120, -20]
+    },
+    {
+      "parameters": { "method": "POST", "url": "={{ $env.N8N_INTERNAL_BASE_URL + '/webhook/buglasan-semantic-index' }}", "sendHeaders": true, "headerParameters": { "parameters": [{ "name": "x-internal-orchestration-token", "value": "={{ $env.N8N_INTERNAL_ORCHESTRATION_TOKEN }}" }] }, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{JSON.stringify({source_id:$json.source_id})}}", "options": { "timeout": 95000, "response": { "response": { "neverError": true, "responseFormat": "json" } } } },
+      "id": "d5bed975-ec02-4a07-a640-40cb95d92e3d", "name": "Dispatch Workflow C", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1340, -20]
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ { source_id: $json.source_id, accepted: true, extraction: $json.extraction, indexing: $json.indexing, candidate_dispatch_count: $json.candidate_event_ids.length, has_more_candidates: $json.has_more_candidates, remaining_candidate_count: $json.remaining_candidate_count } }}", "options": { "responseCode": 200 } },
       "id": "5f88e493-d43c-46de-b783-3fcb7a276106",
       "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [480, 0]
+      "position": [1560, 80]
     }
   ],
   "pinData": {},
@@ -80,7 +128,17 @@
     "Normalize Canonical Payload": { "main": [[{ "node": "Validate Source Contract", "type": "main", "index": 0 }]] },
     "Validate Source Contract": { "main": [[{ "node": "Call Source Ingestion RPC", "type": "main", "index": 0 }]] },
     "Call Source Ingestion RPC": { "main": [[{ "node": "Inspect RPC Result", "type": "main", "index": 0 }]] },
-    "Inspect RPC Result": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    "Inspect RPC Result": { "main": [[{ "node": "Prepare Dispatch Request", "type": "main", "index": 0 }]] },
+    "Prepare Dispatch Request": { "main": [[{ "node": "Get Orchestration Dispatch", "type": "main", "index": 0 }]] },
+    "Get Orchestration Dispatch": { "main": [[{ "node": "Validate Dispatch Plan", "type": "main", "index": 0 }]] },
+    "Emit Recoverable Candidate IDs": { "main": [[{ "node": "Dispatch Workflow D Recovery", "type": "main", "index": 0 }]] },
+    "Dispatch Workflow D Recovery": { "main": [[]] },
+    "Validate Dispatch Plan": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }, { "node": "Emit Recoverable Candidate IDs", "type": "main", "index": 0 }, { "node": "Dispatch Extraction?", "type": "main", "index": 0 }, { "node": "Dispatch Indexing?", "type": "main", "index": 0 }]] },
+    "Respond": { "main": [[]] },
+    "Dispatch Extraction?": { "main": [[{ "node": "Dispatch Workflow B", "type": "main", "index": 0 }], []] },
+    "Dispatch Indexing?": { "main": [[{ "node": "Dispatch Workflow C", "type": "main", "index": 0 }], []] },
+    "Dispatch Workflow B": { "main": [[]] },
+    "Dispatch Workflow C": { "main": [[]] }
   },
   "active": false,
   "settings": { "executionOrder": "v1" },
