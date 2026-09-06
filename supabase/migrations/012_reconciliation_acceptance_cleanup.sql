@@ -1,5 +1,6 @@
 -- Phase 8.1 acceptance-only escape hatch. Normal reconciliation history remains
--- append-only; this function is the sole, service-role, header-token-gated path.
+-- append-only; the trusted Edge Function authenticates the acceptance token before
+-- calling this service-role-only, exact-fixture RPC.
 CREATE OR REPLACE FUNCTION public.reconciliation_prevent_mutation() RETURNS TRIGGER LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   IF current_setting('app.reconciliation_acceptance_cleanup', true) = 'on' THEN RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END; END IF;
@@ -23,10 +24,9 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pu
 DECLARE ids TEXT[]; source_ids UUID[]; candidate_ids UUID[]; run_ids UUID[]; canonical_ids UUID[]; bad_count INTEGER;
 BEGIN
   IF auth.role() <> 'service_role' THEN RAISE EXCEPTION 'service role required'; END IF;
-  IF current_setting('request.headers', true)::jsonb ->> 'x-reconciliation-acceptance-fixture-token' IS DISTINCT FROM current_setting('app.reconciliation_acceptance_fixture_token', true) THEN RAISE EXCEPTION 'invalid fixture token'; END IF;
-  IF current_setting('app.reconciliation_acceptance_fixture_token', true) IS NULL OR current_setting('app.reconciliation_acceptance_fixture_token', true) = '' THEN RAISE EXCEPTION 'fixture cleanup is not configured'; END IF;
-  IF p_fixture_ids IS NULL OR cardinality(p_fixture_ids) = 0 OR EXISTS (SELECT 1 FROM unnest(p_fixture_ids) id WHERE id !~ '^reconciliation-test-(0[1-6])-(create|identical|similar|unknown|no-event|newest)$') THEN RAISE EXCEPTION 'invalid fixture ids'; END IF;
-  ids := ARRAY(SELECT DISTINCT unnest(p_fixture_ids));
+  ids := ARRAY(SELECT DISTINCT unnest(p_fixture_ids) ORDER BY 1);
+  IF p_fixture_ids IS NULL OR cardinality(p_fixture_ids) <> 12 OR cardinality(ids) <> 12
+     OR ids <> ARRAY['reconciliation-test-01-create', 'reconciliation-test-02-identical', 'reconciliation-test-03-reschedule', 'reconciliation-test-04-cancellation', 'reconciliation-test-05-conflicting-date', 'reconciliation-test-06-distinct', 'reconciliation-test-07-registration-extension', 'reconciliation-test-08-venue-change', 'reconciliation-test-09-postponement', 'reconciliation-test-10-new-schedule', 'reconciliation-test-11-null-year', 'reconciliation-test-12-replay']::TEXT[] THEN RAISE EXCEPTION 'invalid fixture ids'; END IF;
   SELECT array_agg(id) INTO source_ids FROM public.sources WHERE post_id = ANY(ids);
   IF source_ids IS NULL THEN RETURN jsonb_build_object('deleted_sources', 0); END IF;
   IF EXISTS (SELECT 1 FROM public.sources WHERE id = ANY(source_ids) AND post_id <> ALL(ids)) THEN RAISE EXCEPTION 'nonfixture source scope'; END IF;

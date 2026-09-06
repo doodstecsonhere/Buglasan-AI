@@ -39,7 +39,7 @@ serve(async (request: Request) => {
   let claim: Record<string, unknown> | null = null
   try {
     claim = await db('rpc/claim_event_reconciliation', { method: 'POST', body: JSON.stringify({ p_candidate_event_id: candidateId, p_reconciler_version: RECONCILER_VERSION, p_claim_token: claimToken, p_lease_seconds: 120 }) }) as Record<string, unknown>
-    if (claim.status !== 'processing' || claim.claim_token !== claimToken) return json(200, { status: claim.status, candidate_event_id: candidateId, cached: claim.status !== 'processing', in_progress: claim.status === 'processing' })
+    if (claim.status !== 'processing' || claim.claim_token !== claimToken) return json(200, { status: claim.status, candidate_event_id: candidateId, canonical_event_id: claim.canonical_event_id ?? null, cached: claim.status !== 'processing', in_progress: claim.status === 'processing' })
     const candidates = await db(`events?id=eq.${candidateId}&select=*&limit=1`) as Candidate[]; const candidate = candidates[0]
     if (!candidate || !candidate.festival_year || !Array.isArray(candidate.extraction_evidence)) throw new Error('candidate_ineligible')
     const events = await db(`canonical_events?festival_year=eq.${candidate.festival_year}&lifecycle_status=in.(scheduled,confirmed,postponed)&select=id,festival_year,lifecycle_status,current_version_id`) as Array<Record<string, unknown>>

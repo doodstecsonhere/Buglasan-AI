@@ -6,3 +6,9 @@ verify_jwt = false
 verify_jwt = false
 [functions.index-source]
 verify_jwt = false
+
+[functions.reconcile-event]
+verify_jwt = false
+
+[functions.cleanup-reconciliation-acceptance]
+verify_jwt = false

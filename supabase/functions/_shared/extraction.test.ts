@@ -63,6 +63,28 @@ describe('knowledge extraction contract', () => {
       .toThrow('explicit local time')
   })
 
+  it('accepts a registration-extension deadline supported by explicit deadline-time evidence', () => {
+    const extensionSource = 'Registration for Buglasan Lantern Parade 2027 at Freedom Park on October 18, 2027 at 6:00 PM is extended until October 10, 2027 at 11:59 PM.'
+    const extension = {
+      ...candidate,
+      event_name: 'Buglasan Lantern Parade 2027',
+      category: null,
+      deadline: '2027-10-10T23:59:00+08:00',
+      fee_kind: 'unknown',
+      fees: null,
+      status: null,
+      evidence: [
+        { field: 'event_name', excerpt: 'Buglasan Lantern Parade 2027' },
+        { field: 'start_datetime', excerpt: 'October 18, 2027 at 6:00 PM' },
+        { field: 'venue', excerpt: 'Freedom Park' },
+        { field: 'deadline', excerpt: 'October 10, 2027 at 11:59 PM' },
+        { field: 'festival_year', excerpt: '2027' },
+      ],
+    }
+    const outcome = validateExtractionResult({ candidates: [extension], source_summary: null }, extensionSource)
+    expect(outcome.result.candidates[0].deadline).toBe('2027-10-10T15:59:00.000Z')
+  })
+
   it('uses fingerprint/version/index identity rather than fuzzy names', () => {
     expect(extractionIdentity('s', 'f', 'v1', 0)).toBe('s:f:v1:0')
     expect(extractionIdentity('s', 'changed', 'v1', 0)).not.toBe(extractionIdentity('s', 'f', 'v1', 0))
