@@ -187,7 +187,7 @@ serve(async (request) => {
   const source = rows[0]
   if (!source) return response(404, { status: 'permanent_error', error: 'source_not_found' })
   const sourceText = typeof source.normalized_text === 'string' ? source.normalized_text : source.raw_text
-  if (source.status !== 'active' || typeof source.content_fingerprint !== 'string' || typeof sourceText !== 'string' || !sourceText.trim()) {
+  if (!['active', 'updated', 'postponed'].includes(String(source.status)) || typeof source.content_fingerprint !== 'string' || typeof sourceText !== 'string' || !sourceText.trim()) {
     return response(409, { status: 'permanent_error', error: 'source_ineligible' })
   }
 

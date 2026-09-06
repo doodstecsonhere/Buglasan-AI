@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest'
+import { parseArguments, parseManifestText, validateManifest, validateManifestRecord } from './phase10-manifest-intake.ts'
+
+const base = {
+  platform: 'facebook', post_id: 'synthetic-2026-001', post_url: 'https://www.facebook.com/Buglasan/posts/synthetic-2026-001',
+  published_at: null, post_year: null, festival_year: null, raw_text: null, normalized_text: null, title: 'Synthetic image-only fixture', source_type: 'image',
+  media_urls: ['https://cdn.example.invalid/synthetic-2026-001.jpg'], collected_at: '2026-01-02T03:04:05Z', collection_method: 'manual', source_metadata: { fixture: 'synthetic-only' },
+  provenance: { operator: 'fixture-operator', reviewed_at: '2026-01-02T03:04:05Z', capture_note: 'Synthetic test input; not real 2026 data' },
+}
+
+describe('Phase 10 manifest intake', () => {
+  it('accepts official, image-only input and preserves explicit nulls', () => {
+    const result = validateManifestRecord(base)
+    expect(result.raw_text).toBeNull(); expect(result.media_urls).toHaveLength(1); expect(result.source_metadata.provenance).toEqual(base.provenance)
+  })
+  it('rejects untrusted URLs, unknown fields, and missing provenance', () => {
+    expect(() => validateManifestRecord({ ...base, post_url: 'https://www.facebook.com/Other/posts/x' })).toThrow(/trusted/)
+    expect(() => validateManifestRecord({ ...base, extra: true })).toThrow(/unknown field/)
+    expect(() => validateManifestRecord({ ...base, provenance: undefined })).toThrow(/provenance/)
+  })
+  it('rejects duplicate stable IDs and parses JSONL', () => {
+    const report = validateManifest([{ ...base }, { ...base }])
+    expect(report.counts).toMatchObject({ total: 2, valid: 1, invalid: 0, duplicate: 1 })
+    expect(report.diagnostics[0].reasons[0]).toMatch(/duplicate/)
+    expect(parseManifestText(`${JSON.stringify(base)}\n\n${JSON.stringify({ ...base, post_id: 'synthetic-2026-002' })}`, 'jsonl')).toHaveLength(2)
+  })
+  it('rejects multiple paths and ignores shell punctuation', () => {
+    expect(parseArguments(['--validate', 'manifest.json;', ';'])).toEqual({ file: 'manifest.json', mode: 'validate' })
+    expect(() => parseArguments(['--validate', 'a.json', 'b.json'])).toThrow(/exactly one positional/)
+  })
+  it('reports all invalid records and useful classifications', () => {
+    const report = validateManifest([base, { ...base, post_id: 'bad', post_url: 'https://example.invalid/not-official' }, { ...base, post_id: 'synthetic-2026-002', raw_text: 'text', normalized_text: 'text', festival_year: 2026 }])
+    expect(report.counts).toMatchObject({ total: 3, valid: 2, invalid: 1, text_bearing: 1, image_only: 1, festival_year_known: 1, festival_year_null: 1 })
+    expect(report.diagnostics[0].reasons.join(' ')).toMatch(/trusted/)
+  })
+})

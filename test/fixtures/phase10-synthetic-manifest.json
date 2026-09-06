@@ -1,0 +1,9 @@
+[
+  {
+    "platform": "facebook", "post_id": "synthetic-phase10-001", "post_url": "https://www.facebook.com/Buglasan/posts/synthetic-phase10-001",
+    "published_at": null, "post_year": null, "festival_year": null, "raw_text": null, "normalized_text": null,
+    "title": "Synthetic image-only fixture", "source_type": "image", "media_urls": ["https://cdn.example.invalid/phase10.jpg"],
+    "collected_at": "2026-01-02T03:04:05Z", "collection_method": "manual", "source_metadata": {"synthetic_fixture": true},
+    "provenance": {"operator": "fixture", "reviewed_at": "2026-01-02T03:04:05Z", "capture_note": "Synthetic only; not real 2026 data"}
+  }
+]

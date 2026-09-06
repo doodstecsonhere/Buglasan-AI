@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+# Local operator manifests may contain real source material; never commit them.
+operator-manifests/
+*.manifest.json
+*.manifest.jsonl
 
 # Supabase CLI temporary files
 supabase/.temp/

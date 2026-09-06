@@ -18,3 +18,6 @@ Each planner result contains at most 25 deterministic candidate IDs, plus `has_m
 The fixture family is fixed to `pipeline-test-*`, marked with the exact `pipeline_acceptance_fixture: phase9-v1` ownership marker, and cleaned exclusively by [`014_pipeline_acceptance_cleanup.sql`](../supabase/migrations/014_pipeline_acceptance_cleanup.sql). Cleanup has no caller-selected IDs, uses constant-time token comparison at the Edge boundary, is service-role-only at the RPC boundary, deletes only the fixed family, and refuses deletion whenever its canonical graph is shared.
 
 The harness calls real deployed `ingest_source`, `extract-source`, `index-source`, `reconcile-event`, and `chat` interfaces. A/B/C/D n8n workflows remain intentionally inactive: their JSON contracts are validated statically and the harness does not claim their webhooks executed. Gemini/provider unavailability is reported as an external blocker without retry hammering. [`npm run pipeline:cleanup`](../package.json) runs the trusted cleanup and the independent zero-remains audit.
+# Phase 10 note
+
+Extraction eligibility accepts current source lifecycle states `active`, `updated`, and `postponed`; `superseded`, `cancelled`, and `archived` remain ineligible. This is aligned with the Phase 9 planner and indexing contract.
