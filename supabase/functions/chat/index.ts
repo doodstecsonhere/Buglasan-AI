@@ -487,7 +487,10 @@ async function retrieveEvidence(
       start_date: temporalFilter?.startDate?.toISOString() ?? null,
       end_date: temporalFilter?.endDate?.toISOString() ?? null,
       category_filter: options.categoryFilter ?? null,
-      status_filter: ['scheduled', 'confirmed'],
+      // Canonical lifecycle corrections are retrieval evidence too: a cancelled
+      // or postponed event must be visible so the assistant does not present a
+      // stale schedule. Exact festival-year filtering remains in the RPC.
+      status_filter: ['scheduled', 'confirmed', 'postponed', 'cancelled'],
     })
   )
 

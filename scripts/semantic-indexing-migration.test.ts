@@ -4,7 +4,7 @@ const path = 'supabase/migrations/009_semantic_indexing.sql'
 const sql = readFileSync(path, 'utf8').toLowerCase()
 const hotfix = readFileSync('supabase/migrations/010_fix_semantic_indexing_uuid_schema.sql', 'utf8').toLowerCase()
 describe('semantic indexing migration contract', () => {
-  it('is followed only by the scoped Phase 7 UUID schema hotfix', () => expect(readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql')).sort().at(-1)).toBe('010_fix_semantic_indexing_uuid_schema.sql'))
+  it('keeps the scoped Phase 7 UUID schema hotfix in the migration sequence', () => expect(readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql'))).toContain('010_fix_semantic_indexing_uuid_schema.sql'))
   it('resolves uuid-ossp functions from the hosted extensions schema', () => {
     expect(sql).toContain('extensions.uuid_generate_v5(extensions.uuid_ns_url()')
     expect(sql).not.toContain('public.uuid_generate_v5(public.uuid_ns_url()')

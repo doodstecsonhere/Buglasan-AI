@@ -248,7 +248,7 @@ async function retrieveEvidence(
       start_date: temporalFilter?.startDate?.toISOString() ?? null,
       end_date: temporalFilter?.endDate?.toISOString() ?? null,
       category_filter: options.categoryFilter ?? null,
-      status_filter: ['scheduled', 'confirmed'],
+      status_filter: ['scheduled', 'confirmed', 'postponed', 'cancelled'],
     })
   )
 
@@ -617,11 +617,24 @@ Deno.test('retrieval: category filter passed to get_festival_events', async () =
   assertEquals((lastRpcCall?.args.category_filter as string[])[0], 'food')
 })
 
-Deno.test('retrieval: status_filter always restricts to current events', async () => {
+Deno.test('retrieval: status_filter includes latest cancellation and postponement corrections', async () => {
   resetMocks()
   const supabase = makeMockSupabase()
   await retrieveEvidence(supabase, 2026, 'events')
-  assertEquals((lastRpcCall?.args.status_filter as string[]).sort(), ['confirmed', 'scheduled'])
+  assertEquals((lastRpcCall?.args.status_filter as string[]).sort(), ['cancelled', 'confirmed', 'postponed', 'scheduled'])
+})
+
+Deno.test('retrieval: exact year keeps latest cancelled and postponed canonical states discoverable', async () => {
+  resetMocks()
+  const supabase = makeMockSupabase()
+  rpcEvents = [
+    mkEvent({ id: 'cancelled-2026', status: 'cancelled', festival_year: 2026 }),
+    mkEvent({ id: 'postponed-2026', status: 'postponed', festival_year: 2026 }),
+    mkEvent({ id: 'cancelled-2025', status: 'cancelled', festival_year: 2025 }),
+  ]
+  const result = await retrieveEvidence(supabase, 2026, 'is the opening still happening?')
+  assertEquals(result.events.map((event) => event.id), ['cancelled-2026', 'postponed-2026'])
+  assertEquals(lastRpcCall?.args.target_festival_year, 2026)
 })
 
 Deno.test('retrieval: empty query rejects embedding generation', async () => {

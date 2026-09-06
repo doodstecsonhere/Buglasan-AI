@@ -9,6 +9,8 @@ const ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('EXTRACTION_ACCEPTANCE_FIXTURE_TOK
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? ''
 const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-flash-latest'
 const EXTRACTOR_VERSION = Deno.env.get('EXTRACTOR_VERSION') ?? 'phase6-v1'
+const RECONCILE_AFTER_EXTRACTION = Deno.env.get('RECONCILE_AFTER_EXTRACTION') === 'true'
+const RECONCILE_EVENT_TOKEN = Deno.env.get('RECONCILE_EVENT_TOKEN') ?? ''
 const MAX_ATTEMPTS = 3
 const LEASE_SECONDS = 120
 const EXTRACTION_TIMEOUT_MS = 90_000
@@ -171,6 +173,13 @@ serve(async (request) => {
       p_extraction_id: claim.id, p_claim_token: claimToken, p_source_id: body.source_id, p_source_fingerprint: source.content_fingerprint,
       p_extractor_version: EXTRACTOR_VERSION, p_status: status, p_result: validated.result, p_review_reasons: validated.reasons,
     }) }) as Record<string, unknown>
+    // Narrow, opt-in handoff only. Extraction remains source-local and does not wait
+    // for, interpret, or mutate canonical reconciliation outcomes.
+    if (RECONCILE_AFTER_EXTRACTION && RECONCILE_EVENT_TOKEN && status === 'extracted') {
+      const candidates = await rest(`events?extracted_source_id=eq.${encodeURIComponent(body.source_id)}&source_fingerprint=eq.${encodeURIComponent(source.content_fingerprint)}&extractor_version=eq.${encodeURIComponent(EXTRACTOR_VERSION)}&select=id`) as Array<{ id?: unknown }>
+      const endpoint = `${SUPABASE_URL}/functions/v1/reconcile-event`
+      await Promise.all(candidates.filter((candidate) => typeof candidate.id === 'string').map((candidate) => fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'x-reconcile-event-token': RECONCILE_EVENT_TOKEN }, body: JSON.stringify({ candidate_event_id: candidate.id }) }).catch(() => null)))
+    }
     return response(200, { status, source_id: body.source_id, persisted_candidates: persisted.persisted_candidates ?? 0, review_reasons: validated.reasons })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'unknown extraction error'
