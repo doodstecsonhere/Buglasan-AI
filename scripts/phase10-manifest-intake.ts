@@ -18,7 +18,7 @@ export type ManifestReport = {
   }
 }
 
-const OFFICIAL_POST = /^https:\/\/www\.facebook\.com\/Buglasan\/(?:posts|videos|photos)\/[A-Za-z0-9._-]+(?:\?[A-Za-z0-9._=&-]+)?$/
+const OFFICIAL_POST_PATH = /^\/Buglasan\/posts\/(?:\d+|[^/]+\/\d+)\/?$/
 const POST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/
 const PROVENANCE_KEYS = new Set(['operator', 'reviewed_at', 'capture_note'])
 const MANIFEST_KEYS = new Set([...['platform', 'post_id', 'post_url', 'published_at', 'post_year', 'festival_year', 'raw_text', 'normalized_text', 'title', 'source_type', 'media_urls', 'collected_at', 'collection_method', 'source_metadata'], 'provenance'])
@@ -27,8 +27,20 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function validateOfficialUrl(value: unknown, issues: string[]): void {
-  if (typeof value !== 'string' || !OFFICIAL_POST.test(value.trim())) issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL')
+function validateOfficialUrl(value: unknown, postId: unknown, issues: string[]): void {
+  if (typeof value !== 'string') {
+    issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL')
+    return
+  }
+  try {
+    const url = new URL(value.trim())
+    const finalId = url.pathname.match(/\/(\d+)\/?$/)?.[1]
+    if (url.protocol !== 'https:' || url.hostname !== 'www.facebook.com' || url.port || url.username || url.password || url.search || url.hash || !OFFICIAL_POST_PATH.test(url.pathname) || finalId !== postId) {
+      issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL whose final numeric ID equals post_id')
+    }
+  } catch {
+    issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL')
+  }
 }
 
 /** Converts one operator record to the existing source ingestion contract without writing data. */
@@ -36,7 +48,7 @@ export function validateManifestRecord(input: unknown): SourceIngestionPayload {
   if (!record(input)) throw new Error('manifest record must be an object')
   const issues: string[] = []
   for (const key of Object.keys(input)) if (!MANIFEST_KEYS.has(key)) issues.push(`unknown field: ${key}`)
-  validateOfficialUrl(input.post_url, issues)
+  validateOfficialUrl(input.post_url, input.post_id, issues)
   if (typeof input.post_id !== 'string' || !POST_ID.test(input.post_id.trim())) issues.push('post_id must be a stable 3-128 character identifier')
   if (!record(input.provenance)) issues.push('provenance is required')
   else {
@@ -97,7 +109,7 @@ const SHELL_PUNCTUATION = new Set([';', ',', ')', ']', '}'])
 export function parseArguments(argv: string[]): { file: string; mode: 'ingest' | 'plan' | 'validate' } {
   const positional = argv
     .filter((arg) => !arg.startsWith('--'))
-    .map((arg) => arg.replace(/[;,\)\]}]+$/, ''))
+    .map((arg) => arg.replace(/[;,)\]}]+$/, ''))
     .filter((arg) => arg.length > 0 && !SHELL_PUNCTUATION.has(arg))
   if (positional.length === 0) throw new Error('usage: phase10:manifest --validate|--plan <manifest.json|.jsonl>')
   if (positional.length > 1) throw new Error(`expected exactly one positional manifest path; received ${positional.length}`)
