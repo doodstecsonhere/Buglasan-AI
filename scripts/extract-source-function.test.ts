@@ -33,6 +33,7 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(code).toContain("request.headers.get('x-acceptance-fixture-token')")
     expect(code).toContain('constantTimeEqual(ACCEPTANCE_FIXTURE_TOKEN, TRUSTED_TOKEN)')
     expect(code).toContain("postId.startsWith('extraction-test-')")
+    expect(code).toContain("postId.startsWith('reconciliation-test-')")
     expect(code).toContain('fixture.source !== sourceText')
     expect(code).not.toMatch(/body\.(?:result|payload|extraction|candidates)/)
   })
