@@ -18,7 +18,10 @@
     "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup",
     "extraction:acceptance": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --acceptance",
     "extraction:cleanup": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --cleanup",
-    "check:extraction-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-knowledge-extractor.json'));JSON.parse(require('fs').readFileSync('test/fixtures/extraction-test-cases.json'));console.log('Extraction JSON valid')\""
+    "check:extraction-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-knowledge-extractor.json'));JSON.parse(require('fs').readFileSync('test/fixtures/extraction-test-cases.json'));console.log('Extraction JSON valid')\"",
+    "indexing:acceptance": "node --experimental-strip-types scripts/semantic-indexing-live.ts --acceptance",
+    "indexing:cleanup": "node --experimental-strip-types scripts/semantic-indexing-live.ts --cleanup",
+    "check:indexing-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-semantic-indexer.json'));console.log('Semantic indexing JSON valid')\""
   },
   "dependencies": {
     "react": "^19.2.8",

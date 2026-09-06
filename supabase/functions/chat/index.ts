@@ -25,6 +25,7 @@ import {
   shouldUseZeroEvidenceFallback,
   type SupportedLanguage,
 } from './grounding.ts'
+import { generateQueryEmbedding } from '../_shared/embedding.ts'
 
 // ============================================
 // Types
@@ -154,7 +155,6 @@ const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
 // embedding model. Vectors are requested with outputDimensionality=768 and
 // L2-normalized at write time / before RPC calls — see normalizeEmbedding().
 const GEMINI_EMBEDDING_MODEL = Deno.env.get('GEMINI_EMBEDDING_MODEL') || 'gemini-embedding-001'
-const EMBEDDING_DIMENSION = 768
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS')!)
 const secretKey = secretKeys['default']
@@ -385,22 +385,6 @@ function resolveTemporalExpression(query: string, currentDate: Date): { startDat
  * This helper is shared with document embeddings written by n8n — the same
  * normalizeEmbedding() must run there so stored vectors are also unit length.
  */
-function normalizeEmbedding(values: number[], dimension: number = EMBEDDING_DIMENSION): number[] {
-  if (!Array.isArray(values) || values.length === 0) {
-    throw new Error('Cannot normalize empty embedding')
-  }
-  const truncated = values.length > dimension ? values.slice(0, dimension) : values
-  let norm = 0
-  for (const v of truncated) norm += v * v
-  norm = Math.sqrt(norm)
-  if (!isFinite(norm) || norm === 0) {
-    throw new Error('Cannot normalize zero-magnitude embedding')
-  }
-  const out = new Array<number>(truncated.length)
-  for (let i = 0; i < truncated.length; i++) out[i] = truncated[i] / norm
-  return out
-}
-
 /**
  * Generate a 768-dimensional query embedding using Gemini's gemini-embedding-001
  * (default, override via GEMINI_EMBEDDING_MODEL).
@@ -417,42 +401,6 @@ function normalizeEmbedding(values: number[], dimension: number = EMBEDDING_DIME
  * downstream retrieval logic — as long as the new provider's vectors are
  * also normalized to unit length before storage/comparison.
  */
-async function generateQueryEmbedding(query: string): Promise<number[]> {
-  if (!query?.trim()) {
-    throw new Error('Cannot embed empty query')
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EMBEDDING_MODEL}:embedContent?key=${GEMINI_API_KEY}`
-
-  const body = {
-    model: `models/${GEMINI_EMBEDDING_MODEL}`,
-    content: {
-      parts: [{ text: query }],
-    },
-    outputDimensionality: EMBEDDING_DIMENSION,
-    taskType: 'RETRIEVAL_QUERY',
-  }
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => 'unknown error')
-    throw new Error(`Embedding API failed (${res.status}): ${errText}`)
-  }
-
-  const data = await res.json()
-  const values = data?.embedding?.values
-
-  if (!Array.isArray(values) || values.length === 0) {
-    throw new Error(`Embedding returned no values (got ${values?.length ?? 0})`)
-  }
-
-  return normalizeEmbedding(values as number[])
-}
 
 // ============================================
 // Hybrid Retrieval: retrieveEvidence
@@ -511,7 +459,7 @@ async function retrieveEvidence(
   // Step 1: Embed the query
   let embedding: number[] | null = null
   try {
-    embedding = await generateQueryEmbedding(query)
+    embedding = await generateQueryEmbedding(query, { apiKey: GEMINI_API_KEY, model: GEMINI_EMBEDDING_MODEL })
   } catch (err) {
     console.error('Query embedding failed, falling back to event-only retrieval:', err)
     // We can still return events without semantic source chunks.

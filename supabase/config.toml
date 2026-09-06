@@ -4,3 +4,5 @@ verify_jwt = false
 
 [functions.extract-source]
 verify_jwt = false
+[functions.index-source]
+verify_jwt = false

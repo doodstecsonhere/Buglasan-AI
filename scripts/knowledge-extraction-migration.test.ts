@@ -9,7 +9,7 @@ const migration008 = readFileSync(new URL('008_sync_event_current_status.sql', m
 
 describe('Phase 6 migration', () => {
   it('preserves the complete ordered 001-007 migration chain', () => {
-    expect(migrationFiles).toEqual([
+    expect(migrationFiles.slice(0, 8)).toEqual([
       '001_initial_schema.sql',
       '002_fix_embedding_dimension_and_status_model.sql',
       '003_source_collector.sql',
