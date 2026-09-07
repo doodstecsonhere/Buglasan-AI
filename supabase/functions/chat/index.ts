@@ -28,6 +28,7 @@ import {
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
 import { isAuthorizedDiagnosticRequest } from './authorization.ts'
 import { getGenerationFailure, type GenerationFailure } from './generationDiagnostics.ts'
+import { generateContentWithRetry, GENERATION_RETRY_METADATA, type GenerationRetryMetadata } from './generationRetry.ts'
 
 // ============================================
 // Types
@@ -424,7 +425,7 @@ interface RetrieveEvidenceOptions {
 
 interface DiagnosticReport {
   generationModel?: string
-  generation?: { succeeded: boolean; failure?: GenerationFailure }
+  generation?: { succeeded: boolean; failure?: GenerationFailure } & Partial<GenerationRetryMetadata>
 }
 
 interface RetrievalDiagnostic {
@@ -964,12 +965,14 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
 
     let result
     try {
-      result = await model.generateContent(prompt)
+      const generated = await generateContentWithRetry(() => model.generateContent(prompt))
+      result = generated.result
+      if (diagnostic) diagnostic.generation = { succeeded: true, ...generated.metadata }
     } catch (error) {
-      if (diagnostic) diagnostic.generation = { succeeded: false, failure: getGenerationFailure(error) }
+      const retryMetadata = error && typeof error === 'object' ? (error as Record<symbol, unknown>)[GENERATION_RETRY_METADATA] as Partial<GenerationRetryMetadata> | undefined : undefined
+      if (diagnostic) diagnostic.generation = { succeeded: false, failure: getGenerationFailure(error), ...retryMetadata }
       throw error
     }
-    if (diagnostic) diagnostic.generation = { succeeded: true }
 
     if (diagnostic) {
       return new Response(JSON.stringify({ diagnostics: diagnostic }), {
