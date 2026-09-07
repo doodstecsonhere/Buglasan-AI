@@ -27,6 +27,7 @@ import {
 } from './grounding.ts'
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
 import { isAuthorizedDiagnosticRequest } from './authorization.ts'
+import { getGenerationFailure, type GenerationFailure } from './generationDiagnostics.ts'
 
 // ============================================
 // Types
@@ -418,15 +419,16 @@ interface RetrieveEvidenceOptions {
   includeHistorical?: boolean
   // For explicit correction questions: walk the supersession chain
   resolveSupersessionChains?: boolean
-  diagnostic?: DiagnosticReport
+  diagnostic?: RetrievalDiagnostic
 }
 
 interface DiagnosticReport {
+  generation?: { succeeded: boolean; failure?: GenerationFailure }
+}
+
+interface RetrievalDiagnostic {
   embedding: { attempted: boolean; succeeded: boolean; durationMs: number; dimensions: number | null }
-  rpc: {
-    searchSourceChunks: RpcDiagnostic
-    getFestivalEvents: RpcDiagnostic
-  }
+  rpc: { searchSourceChunks: RpcDiagnostic; getFestivalEvents: RpcDiagnostic }
   retrieval: { matchThreshold: number }
 }
 
@@ -439,14 +441,7 @@ interface RpcDiagnostic {
 }
 
 function createDiagnosticReport(): DiagnosticReport {
-  return {
-    embedding: { attempted: false, succeeded: false, durationMs: 0, dimensions: null },
-    rpc: {
-      searchSourceChunks: { attempted: false, succeeded: false, durationMs: 0, rows: 0 },
-      getFestivalEvents: { attempted: false, succeeded: false, durationMs: 0, rows: 0 },
-    },
-    retrieval: { matchThreshold: CONTEXT_LIMITS.chunkMatchThreshold },
-  }
+  return {}
 }
 
 function getSafeRpcErrorMetadata(error: unknown): NonNullable<RpcDiagnostic['error']> {
@@ -465,7 +460,7 @@ function getSafeRpcErrorMetadata(error: unknown): NonNullable<RpcDiagnostic['err
 }
 
 function recordRpcDiagnostic(
-  diagnostic: DiagnosticReport | undefined,
+  diagnostic: RetrievalDiagnostic | undefined,
   rpc: RpcDiagnostic,
   startedAt: number,
   result: { data?: unknown; error?: unknown }
@@ -814,12 +809,13 @@ serve(async (req) => {
     })
   }
 
+  let diagnostic: DiagnosticReport | undefined
   try {
     const body: ChatRequest = await req.json()
     const { message, festivalYear, language = 'en', conversationHistory = [] } = body
     const diagnosticRequested = body.diagnostic === true
     const diagnosticAuthorized = diagnosticRequested && isAuthorizedDiagnosticRequest(req)
-    const diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
+    diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
 
     if (!message?.trim()) {
       return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -864,21 +860,14 @@ serve(async (req) => {
       {
         includeHistorical: isHistoricalRequest,
         resolveSupersessionChains: isCorrectionQuery,
-        diagnostic,
+        diagnostic: undefined,
       }
     )
-
-    if (diagnostic) {
-      return new Response(JSON.stringify({ diagnostics: diagnostic }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
 
     // Factual festival questions must never reach the generative model when
     // retrieval produced no usable official evidence. General conversation
     // remains model-handled even without evidence.
-    if (shouldUseZeroEvidenceFallback(message, evidence)) {
+    if (!diagnostic && shouldUseZeroEvidenceFallback(message, evidence)) {
       const response: ChatResponse = {
         message: {
           id: crypto.randomUUID(),
@@ -970,7 +959,21 @@ ${isHistoricalRequest ? `- Note: The user explicitly asked for FY${resolvedYear}
 ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it to explain what changed and when, but do not invent details about sources not in the chain.' : ''}
 - If a source status is "superseded" or "cancelled" or "archived", do NOT cite it as current — it is included only for lineage context.`
 
-    const result = await model.generateContent(prompt)
+    let result
+    try {
+      result = await model.generateContent(prompt)
+    } catch (error) {
+      if (diagnostic) diagnostic.generation = { succeeded: false, failure: getGenerationFailure(error) }
+      throw error
+    }
+    if (diagnostic) diagnostic.generation = { succeeded: true }
+
+    if (diagnostic) {
+      return new Response(JSON.stringify({ diagnostics: diagnostic }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
     const responseText = result.response.text()
 
     const citations = extractCitations(responseText, evidence.sources)
@@ -999,13 +1002,14 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
     const classification = classifyChatError(error)
     const requestId = crypto.randomUUID()
     console.error('Chat function error', { requestId, category: classification.category, code: classification.code })
-    return new Response(
-      JSON.stringify({
+    const body = {
         error: 'Internal server error',
         category: classification.category,
         code: classification.code,
         requestId,
-      }),
+        ...(diagnostic ? { diagnostics: diagnostic } : {}),
+      }
+    return new Response(JSON.stringify(body),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

@@ -147,7 +147,7 @@ async function singleAcceptance(): Promise<void> {
 
 async function diagnosticChat(): Promise<void> {
   guard()
-  const response = await fetch(`${url}/functions/v1/chat`, { method: 'POST', headers: { apikey: key!, 'content-type': 'application/json', 'x-chat-diagnostic-token': chatDiagnosticToken }, body: JSON.stringify({ message: 'What is the Buglasan Pipeline Canonical 2027 schedule?', festivalYear: 2027, diagnostic: true }) })
+  const response = await fetch(`${url}/functions/v1/chat`, { method: 'POST', headers: { apikey: key!, 'content-type': 'application/json', 'x-chat-diagnostic-token': chatDiagnosticToken }, body: JSON.stringify({ message: 'When is Buglasan Festival 2026?', festivalYear: 2026, language: 'en', diagnostic: true }) })
   const result = response.ok ? { status: response.status, contentType: response.headers.get('content-type'), body: await response.text() } : await readSafeHttpFailure(response)
   console.log(`DIAGNOSTIC_CHAT=${JSON.stringify(result)}`)
   if (!response.ok) throw new Error('Diagnostic chat request failed')

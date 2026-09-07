@@ -73,7 +73,7 @@ describe('chat diagnostic contract', () => {
     expect(chat).toContain("typeof record.message === 'string'")
     expect(chat).toContain("typeof record[key] === 'string'")
     expect(chat).toContain("if (result?.error) rpc.error = getSafeRpcErrorMetadata(result.error)")
-    expect(chat).toContain("matchThreshold: CONTEXT_LIMITS.chunkMatchThreshold")
+    expect(chat).not.toContain("matchThreshold: CONTEXT_LIMITS.chunkMatchThreshold")
     expect(chat).not.toContain('diagnosticToken')
     expect(chat).not.toContain('suppliedSecret')
   })
@@ -87,5 +87,13 @@ describe('chat diagnostic contract', () => {
     expect(live).toContain('process.env.CHAT_DIAGNOSTIC_TOKEN')
     expect(live).toContain('|| !chatDiagnosticToken')
     expect(client).not.toContain('diagnostic')
+  })
+
+  it('uses the exact guarded generation diagnostic payload', () => {
+    expect(live).toContain("message: 'When is Buglasan Festival 2026?'")
+    expect(live).toContain('festivalYear: 2026')
+    expect(live).toContain("language: 'en'")
+    expect(live).toContain('diagnostic: true')
+    expect(live).toContain("'x-chat-diagnostic-token': chatDiagnosticToken")
   })
 })
