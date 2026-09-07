@@ -186,6 +186,12 @@ function parseCandidate(value: unknown, sourceText: string, index: number): Even
     evidence,
     review_reasons: [...new Set(reviewReasons)].sort(),
   }
+  for (const field of ['event_name', 'description', 'venue', 'organizer', 'eligibility', 'contact_info'] as const) {
+    const value = candidate[field]
+    if (value !== null && !evidence.some((item) => item.field === field && item.excerpt.includes(value))) {
+      throw new Error(`${field} is asserted without evidence`)
+    }
+  }
   if (candidate.fee_kind === 'free' && candidate.fees !== null && !/^free$/i.test(candidate.fees)) throw new Error('free fee_kind conflicts with fees')
   if (candidate.fee_kind === 'unknown' && candidate.fees !== null) throw new Error('unknown fee_kind requires null fees')
   return candidate

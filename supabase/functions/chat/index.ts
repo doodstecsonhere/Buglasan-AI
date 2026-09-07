@@ -28,7 +28,9 @@ import {
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
 import { isAuthorizedDiagnosticRequest } from './authorization.ts'
 import { getGenerationFailure, type GenerationFailure } from './generationDiagnostics.ts'
-import { generateContentWithRetry, GENERATION_RETRY_METADATA, type GenerationRetryMetadata } from './generationRetry.ts'
+import { GENERATION_RETRY_METADATA, type GenerationRetryMetadata } from './generationRetry.ts'
+import { geminiAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
+import { generateWithFailover } from '../_shared/providerFailover.ts'
 
 // ============================================
 // Types
@@ -965,9 +967,10 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
 
     let result
     try {
-      const generated = await generateContentWithRetry(() => model.generateContent(prompt))
-      result = generated.result
-      if (diagnostic) diagnostic.generation = { succeeded: true, ...generated.metadata }
+      const primary = geminiAdapter(GEMINI_MODEL, async (requestPrompt) => (await model.generateContent(requestPrompt)).response.text())
+      const generated = await generateWithFailover({ prompt }, primary, configuredSecondaryAdapter(), (text) => text)
+      result = { response: { text: () => generated.value } }
+      if (diagnostic) diagnostic.generation = { succeeded: true, generationAttempts: generated.metadata.attempts, generationRetries: generated.metadata.retries, generationRecoveredAfterRetry: generated.metadata.attempts > 1, generationFailureSequence: generated.metadata.failures.concat('success'), provider: generated.metadata.provider }
     } catch (error) {
       const retryMetadata = error && typeof error === 'object' ? (error as Record<symbol, unknown>)[GENERATION_RETRY_METADATA] as Partial<GenerationRetryMetadata> | undefined : undefined
       if (diagnostic) diagnostic.generation = { succeeded: false, failure: getGenerationFailure(error), ...retryMetadata }

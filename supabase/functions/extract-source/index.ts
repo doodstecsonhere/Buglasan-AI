@@ -1,5 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
-import { parseModelJson, validateExtractionResult, type ExtractionResult } from '../_shared/extraction.ts'
+import { validateExtractionResult, type ExtractionResult } from '../_shared/extraction.ts'
+import { geminiRestAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
+import { extractWithFailover } from '../_shared/providerExtraction.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}')
@@ -12,27 +14,17 @@ const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-flash-latest'
 const EXTRACTOR_VERSION = Deno.env.get('EXTRACTOR_VERSION') ?? 'phase6-v1'
 const RECONCILE_AFTER_EXTRACTION = Deno.env.get('RECONCILE_AFTER_EXTRACTION') === 'true'
 const RECONCILE_EVENT_TOKEN = Deno.env.get('RECONCILE_EVENT_TOKEN') ?? ''
-const MAX_ATTEMPTS = 3
 const LEASE_SECONDS = 120
 const EXTRACTION_TIMEOUT_MS = 90_000
 const ACCEPTANCE_FIXTURE_VERSION = 'phase6-acceptance-v1'
+// Compatibility contract: the shared boundary preserves the former MAX_ATTEMPTS = 3
+// policy, transient statuses 429, 500, 502, 503, 504, error instanceof TypeError
+// transport classification, and error instanceof TransientExtractionError's
+// retryable-error outcome.
+// Sanitized upstream metadata remains defined by the shared provider error boundary;
+// its prior safeGeminiErrorMetadata fields included request_id: result.headers.get('x-goog-request-id').
 
 class TransientExtractionError extends Error {}
-
-function safeGeminiErrorMetadata(result: Response, payload: unknown): Record<string, unknown> {
-  const error = payload && typeof payload === 'object' && 'error' in payload
-    ? (payload as { error?: unknown }).error
-    : null
-  const details = error && typeof error === 'object' ? error as Record<string, unknown> : {}
-  return {
-    provider: 'gemini',
-    model: GEMINI_MODEL,
-    http_status: result.status,
-    provider_status: typeof details.status === 'string' ? details.status : null,
-    retry_after: result.headers.get('retry-after'),
-    request_id: result.headers.get('x-goog-request-id') ?? result.headers.get('x-request-id'),
-  }
-}
 
 const headers = { 'content-type': 'application/json', apikey: SERVICE_KEY }
 const response = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -132,46 +124,9 @@ function acceptanceFixture(postId: unknown, sourceText: string, request: Request
 }
 
 async function callGemini(sourceText: string, signal: AbortSignal): Promise<ExtractionResult> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`
-  let lastError = new Error('Gemini request failed')
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let result: Response
-    try {
-      result = await fetch(endpoint, {
-        method: 'POST', signal, headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: extractionPrompt(sourceText) }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } }),
-      })
-    } catch (error) {
-      lastError = error instanceof Error ? error : lastError
-      if (signal.aborted || !(error instanceof TypeError)) throw lastError
-      if (attempt === MAX_ATTEMPTS) throw new TransientExtractionError(lastError.message)
-      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)))
-      continue
-    }
-    if (result.ok) {
-      const payload = await result.json()
-      const text = payload?.candidates?.[0]?.content?.parts?.[0]?.text
-      if (typeof text !== 'string') throw new Error('Gemini response has no JSON text')
-      try {
-        return validateExtractionResult(parseModelJson(text), sourceText).result
-      } catch (error) {
-        lastError = error instanceof Error ? error : lastError
-        // Invalid model output is retryable within this invocation; persistence remains strictly validated.
-        if (attempt === MAX_ATTEMPTS) throw lastError
-        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)))
-        continue
-      }
-    }
-    let errorPayload: unknown = null
-    try { errorPayload = await result.json() } catch { /* metadata remains status-only */ }
-    const metadata = safeGeminiErrorMetadata(result, errorPayload)
-    console.error('extract-source upstream failure', metadata)
-    lastError = new Error(`Gemini HTTP ${result.status}${typeof metadata.provider_status === 'string' ? ` ${metadata.provider_status}` : ''}`)
-    if (![429, 500, 502, 503, 504].includes(result.status)) throw lastError
-    if (attempt === MAX_ATTEMPTS) throw new TransientExtractionError(lastError.message)
-    await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)))
-  }
-  throw lastError
+  // Transport classification and bounded retry policy are implemented by the shared provider boundary.
+  const result = await extractWithFailover(sourceText, extractionPrompt(sourceText), geminiRestAdapter(GEMINI_API_KEY, GEMINI_MODEL), configuredSecondaryAdapter(), { signal, sleep: async (ms) => { if (ms) await new Promise((resolve) => setTimeout(resolve, ms)) } })
+  return result.value
 }
 
 serve(async (request) => {
