@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isAuthorizedDiagnosticRequest } from '../supabase/functions/chat/authorization.ts'
+import { readFileSync } from 'node:fs'
 
 const originalDeno = (globalThis as Record<string, unknown>).Deno
 
@@ -47,5 +48,44 @@ describe('isAuthorizedDiagnosticRequest', () => {
     expect(isAuthorizedDiagnosticRequest(request('diagnostic-secret'))).toBe(true)
     expect(get).toHaveBeenCalledWith('CHAT_DIAGNOSTIC_TOKEN')
     expect(get).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('chat diagnostic contract', () => {
+  const chat = readFileSync('supabase/functions/chat/index.ts', 'utf8')
+  const client = readFileSync('src/services/chatService.ts', 'utf8')
+  const live = readFileSync('scripts/orchestration-live.ts', 'utf8')
+
+  it('treats an unauthorized diagnostic marker as ordinary chat', () => {
+    expect(chat).toContain('body.diagnostic === true')
+    expect(chat).toContain('isAuthorizedDiagnosticRequest(req)')
+    expect(chat).not.toContain("status: 401")
+    expect(chat).toContain('diagnosticAuthorized = diagnosticRequested && isAuthorizedDiagnosticRequest(req)')
+    expect(chat).not.toContain('diagnosticRequested && !diagnosticAuthorized')
+    expect(chat).toContain('const diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined')
+  })
+
+  it('keeps diagnostic output restricted to authorized requests and captures rejected RPCs safely', () => {
+    expect(chat).toContain('diagnostics: diagnostic')
+    expect(chat).toContain('.catch((error: unknown)')
+    expect(chat).toContain('getSafeRpcErrorMetadata')
+    expect(chat).toContain("return { data: [], error: getSafeRpcErrorMetadata(error) }")
+    expect(chat).toContain("typeof record.message === 'string'")
+    expect(chat).toContain("typeof record[key] === 'string'")
+    expect(chat).toContain("if (result?.error) rpc.error = getSafeRpcErrorMetadata(result.error)")
+    expect(chat).toContain("matchThreshold: CONTEXT_LIMITS.chunkMatchThreshold")
+    expect(chat).not.toContain('diagnosticToken')
+    expect(chat).not.toContain('suppliedSecret')
+  })
+
+  it('keeps the retrieval contract and frontend unchanged', () => {
+    expect(chat).toContain("generateQueryEmbedding(query, { apiKey: GEMINI_API_KEY, model: GEMINI_EMBEDDING_MODEL })")
+    expect(chat).toContain("supabase.rpc('search_source_chunks'")
+    expect(chat).toContain("supabase.rpc('get_festival_events'")
+    expect(chat).toContain('match_threshold: CONTEXT_LIMITS.chunkMatchThreshold')
+    expect(live).toContain("diagnostic: true")
+    expect(live).toContain('process.env.CHAT_DIAGNOSTIC_TOKEN')
+    expect(live).toContain('|| !chatDiagnosticToken')
+    expect(client).not.toContain('diagnostic')
   })
 })

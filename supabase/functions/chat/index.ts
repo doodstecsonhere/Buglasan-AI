@@ -26,12 +26,14 @@ import {
   type SupportedLanguage,
 } from './grounding.ts'
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
+import { isAuthorizedDiagnosticRequest } from './authorization.ts'
 
 // ============================================
 // Types
 // ============================================
 interface ChatRequest {
   message: string
+  diagnostic?: boolean
   festivalYear?: number
   language?: SupportedLanguage
   conversationHistory?: Array<{
@@ -416,6 +418,67 @@ interface RetrieveEvidenceOptions {
   includeHistorical?: boolean
   // For explicit correction questions: walk the supersession chain
   resolveSupersessionChains?: boolean
+  diagnostic?: DiagnosticReport
+}
+
+interface DiagnosticReport {
+  embedding: { attempted: boolean; succeeded: boolean; durationMs: number; dimensions: number | null }
+  rpc: {
+    searchSourceChunks: RpcDiagnostic
+    getFestivalEvents: RpcDiagnostic
+  }
+  retrieval: { matchThreshold: number }
+}
+
+interface RpcDiagnostic {
+  attempted: boolean
+  succeeded: boolean
+  durationMs: number
+  rows: number
+  error?: { name: string; message: string; code?: string; details?: string; hint?: string }
+}
+
+function createDiagnosticReport(): DiagnosticReport {
+  return {
+    embedding: { attempted: false, succeeded: false, durationMs: 0, dimensions: null },
+    rpc: {
+      searchSourceChunks: { attempted: false, succeeded: false, durationMs: 0, rows: 0 },
+      getFestivalEvents: { attempted: false, succeeded: false, durationMs: 0, rows: 0 },
+    },
+    retrieval: { matchThreshold: CONTEXT_LIMITS.chunkMatchThreshold },
+  }
+}
+
+function getSafeRpcErrorMetadata(error: unknown): NonNullable<RpcDiagnostic['error']> {
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    const metadata: NonNullable<RpcDiagnostic['error']> = {
+      name: typeof record.name === 'string' ? record.name : 'Error',
+      message: typeof record.message === 'string' ? record.message : 'RPC request failed',
+    }
+    for (const key of ['code', 'details', 'hint'] as const) {
+      if (typeof record[key] === 'string') metadata[key] = record[key]
+    }
+    return metadata
+  }
+  return { name: 'Error', message: typeof error === 'string' ? error : 'RPC request failed' }
+}
+
+function recordRpcDiagnostic(
+  diagnostic: DiagnosticReport | undefined,
+  rpc: RpcDiagnostic,
+  startedAt: number,
+  result: { data?: unknown; error?: unknown }
+): void {
+  if (!diagnostic) return
+  rpc.durationMs = Math.round(performance.now() - startedAt)
+  rpc.succeeded = !result?.error
+  rpc.rows = Array.isArray(result?.data) ? result.data.length : 0
+  if (result?.error) rpc.error = getSafeRpcErrorMetadata(result.error)
+}
+
+function rejectedRpcResult(error: unknown): { data: []; error: NonNullable<RpcDiagnostic['error']> } {
+  return { data: [], error: getSafeRpcErrorMetadata(error) }
 }
 
 /**
@@ -449,6 +512,7 @@ async function retrieveEvidence(
     chunkMatchCount: CONTEXT_LIMITS.chunkMatchCount,
     eventMatchCount: CONTEXT_LIMITS.eventMatchCount,
   }
+  const diagnostic = options.diagnostic
 
   const empty: EvidencePacket = {
     sources: [],
@@ -461,9 +525,17 @@ async function retrieveEvidence(
 
   // Step 1: Embed the query
   let embedding: number[] | null = null
+  const embeddingStartedAt = diagnostic ? performance.now() : 0
+  if (diagnostic) diagnostic.embedding.attempted = true
   try {
     embedding = await generateQueryEmbedding(query, { apiKey: GEMINI_API_KEY, model: GEMINI_EMBEDDING_MODEL })
+    if (diagnostic) {
+      diagnostic.embedding.succeeded = true
+      diagnostic.embedding.dimensions = embedding.length
+      diagnostic.embedding.durationMs = Math.round(performance.now() - embeddingStartedAt)
+    }
   } catch (err) {
+    if (diagnostic) diagnostic.embedding.durationMs = Math.round(performance.now() - embeddingStartedAt)
     console.error('Query embedding failed, falling back to event-only retrieval:', err)
     // We can still return events without semantic source chunks.
   }
@@ -472,18 +544,29 @@ async function retrieveEvidence(
   const tasks: Array<Promise<any>> = []
 
   if (embedding) {
+    const searchStartedAt = diagnostic ? performance.now() : 0
+    if (diagnostic) diagnostic.rpc.searchSourceChunks.attempted = true
     tasks.push(
       supabase.rpc('search_source_chunks', {
         query_embedding: embedding,
         target_festival_year: festivalYear,
         match_threshold: CONTEXT_LIMITS.chunkMatchThreshold,
         match_count: limits.chunkMatchCount,
+      }).then((result: any) => {
+        recordRpcDiagnostic(diagnostic, diagnostic?.rpc.searchSourceChunks as RpcDiagnostic, searchStartedAt, result)
+        return result
+      }).catch((error: unknown) => {
+        const result = rejectedRpcResult(error)
+        recordRpcDiagnostic(diagnostic, diagnostic?.rpc.searchSourceChunks as RpcDiagnostic, searchStartedAt, result)
+        return result
       })
     )
   } else {
     tasks.push(Promise.resolve({ data: [], error: null }))
   }
 
+  const eventsStartedAt = diagnostic ? performance.now() : 0
+  if (diagnostic) diagnostic.rpc.getFestivalEvents.attempted = true
   tasks.push(
     supabase.rpc('get_festival_events', {
       target_festival_year: festivalYear,
@@ -494,6 +577,13 @@ async function retrieveEvidence(
       // or postponed event must be visible so the assistant does not present a
       // stale schedule. Exact festival-year filtering remains in the RPC.
       status_filter: ['scheduled', 'confirmed', 'postponed', 'cancelled'],
+    }).then((result: any) => {
+      recordRpcDiagnostic(diagnostic, diagnostic?.rpc.getFestivalEvents as RpcDiagnostic, eventsStartedAt, result)
+      return result
+    }).catch((error: unknown) => {
+      const result = rejectedRpcResult(error)
+      recordRpcDiagnostic(diagnostic, diagnostic?.rpc.getFestivalEvents as RpcDiagnostic, eventsStartedAt, result)
+      return result
     })
   )
 
@@ -709,7 +799,7 @@ function detectCorrectionQuery(query: string): boolean {
 serve(async (req) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-chat-diagnostic-token',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   }
 
@@ -727,6 +817,9 @@ serve(async (req) => {
   try {
     const body: ChatRequest = await req.json()
     const { message, festivalYear, language = 'en', conversationHistory = [] } = body
+    const diagnosticRequested = body.diagnostic === true
+    const diagnosticAuthorized = diagnosticRequested && isAuthorizedDiagnosticRequest(req)
+    const diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
 
     if (!message?.trim()) {
       return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -771,8 +864,16 @@ serve(async (req) => {
       {
         includeHistorical: isHistoricalRequest,
         resolveSupersessionChains: isCorrectionQuery,
+        diagnostic,
       }
     )
+
+    if (diagnostic) {
+      return new Response(JSON.stringify({ diagnostics: diagnostic }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     // Factual festival questions must never reach the generative model when
     // retrieval produced no usable official evidence. General conversation

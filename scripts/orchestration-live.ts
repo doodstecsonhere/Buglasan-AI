@@ -22,10 +22,11 @@ const fixtureToken = process.env.PIPELINE_ACCEPTANCE_FIXTURE_TOKEN
 const extractToken = process.env.EXTRACT_SOURCE_TOKEN
 const indexToken = process.env.INDEX_SOURCE_TOKEN
 const reconcileToken = process.env.RECONCILE_EVENT_TOKEN
+const chatDiagnosticToken = process.env.CHAT_DIAGNOSTIC_TOKEN
 
 function guard(): void {
   if (process.env.LIVE_PIPELINE_ACCEPTANCE_TEST !== 'I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION') throw new Error('Live pipeline opt-in is not set exactly')
-  if (!url || !key || !expectedRef || !fixtureToken || !extractToken || !indexToken || !reconcileToken) throw new Error('Required server-side environment variable names are not configured')
+  if (!url || !key || !expectedRef || !fixtureToken || !extractToken || !indexToken || !reconcileToken || !chatDiagnosticToken) throw new Error('Required server-side environment variable names are not configured')
   if (new URL(url).hostname.split('.')[0] !== expectedRef) throw new Error('SUPABASE_EXPECTED_PROJECT_REF does not match SUPABASE_URL')
   if ([extractToken, indexToken, reconcileToken].includes(fixtureToken)) throw new Error('Pipeline fixture token must differ from worker tokens')
 }
@@ -146,7 +147,7 @@ async function singleAcceptance(): Promise<void> {
 
 async function diagnosticChat(): Promise<void> {
   guard()
-  const response = await fetch(`${url}/functions/v1/chat`, { method: 'POST', headers: { apikey: key!, 'content-type': 'application/json' }, body: JSON.stringify({ message: 'What is the Buglasan Pipeline Canonical 2027 schedule?', festivalYear: 2027 }) })
+  const response = await fetch(`${url}/functions/v1/chat`, { method: 'POST', headers: { apikey: key!, 'content-type': 'application/json', 'x-chat-diagnostic-token': chatDiagnosticToken }, body: JSON.stringify({ message: 'What is the Buglasan Pipeline Canonical 2027 schedule?', festivalYear: 2027, diagnostic: true }) })
   const result = response.ok ? { status: response.status, contentType: response.headers.get('content-type'), body: await response.text() } : await readSafeHttpFailure(response)
   console.log(`DIAGNOSTIC_CHAT=${JSON.stringify(result)}`)
   if (!response.ok) throw new Error('Diagnostic chat request failed')
