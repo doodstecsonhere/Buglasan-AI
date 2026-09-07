@@ -423,6 +423,7 @@ interface RetrieveEvidenceOptions {
 }
 
 interface DiagnosticReport {
+  generationModel?: string
   generation?: { succeeded: boolean; failure?: GenerationFailure }
 }
 
@@ -815,7 +816,9 @@ serve(async (req) => {
     const { message, festivalYear, language = 'en', conversationHistory = [] } = body
     const diagnosticRequested = body.diagnostic === true
     const diagnosticAuthorized = diagnosticRequested && isAuthorizedDiagnosticRequest(req)
+    // const diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
     diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
+    if (diagnostic) diagnostic.generationModel = GEMINI_MODEL
 
     if (!message?.trim()) {
       return new Response(JSON.stringify({ error: 'Message is required' }), {
