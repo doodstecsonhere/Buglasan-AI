@@ -18,6 +18,7 @@
     "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup",
     "phase10:manifest": "node --experimental-strip-types scripts/phase10-manifest-intake.ts --validate",
     "phase10:status": "node --experimental-strip-types scripts/phase10-status.ts",
+    "phase10:terminal-recovery": "node --experimental-strip-types scripts/phase10-terminal-recovery-live.ts",
     "extraction:acceptance": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --acceptance",
     "extraction:cleanup": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --cleanup",
     "check:extraction-json": "node -e \"JSON.parse(require('fs').readFileSync('n8n/workflows/buglasan-knowledge-extractor.json'));JSON.parse(require('fs').readFileSync('test/fixtures/extraction-test-cases.json'));console.log('Extraction JSON valid')\"",
