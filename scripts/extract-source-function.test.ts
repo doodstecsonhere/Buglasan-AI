@@ -60,6 +60,27 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(code).toContain('fixture.source !== sourceText')
     expect(code).not.toMatch(/body\.(?:result|payload|extraction|candidates)/)
   })
+
+  it('has an operator-only Phase 10 path bound to the exact approved claim contract', () => {
+    expect(code).toContain("Deno.env.get('PHASE10_OPERATOR_TOKEN') ?? ''")
+    expect(code).toContain("request.headers.get('x-phase10-operator-token')")
+    expect(code).toContain('p_source_before: body.source_before')
+    expect(code).toContain('p_extraction_before: extractionBefore')
+    expect(code).toContain("rpc/claim_phase10_terminal_retry")
+    expect(code).toContain('body.source_fingerprint')
+    expect(code).toContain('body.extractor_version !== EXTRACTOR_VERSION')
+    expect(code).toContain('validOperatorMetadata(body.operator_metadata)')
+    expect(code).toContain('!privileged && RECONCILE_AFTER_EXTRACTION')
+    expect(code).toContain("'phase10_claim_rejected'")
+  })
+
+  it('keeps the privileged path bounded and free of provider/raw diagnostic output', () => {
+    expect(code).toContain("'phase10_source_binding_failed'")
+    expect(code).toContain("'invalid_phase10_request'")
+    expect(code).not.toMatch(/return response\([^\n]*error\.message/)
+    expect(code).not.toMatch(/return response\([^\n]*JSON\.stringify\(error/)
+    expect(code).toContain("p_error_message: diagnostic.message")
+  })
   it('does not add prohibited processing paths', () => {
     expect(code).not.toMatch(/source_chunks|embedding|\bOCR\b/i)
     expect(code).toContain('Do not use external knowledge')

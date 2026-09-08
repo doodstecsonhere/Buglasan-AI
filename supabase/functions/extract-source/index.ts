@@ -9,6 +9,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}')
 const SERVICE_KEY = secretKeys['default'] ?? ''
 const TRUSTED_TOKEN = Deno.env.get('EXTRACT_SOURCE_TOKEN') ?? ''
+const PHASE10_OPERATOR_TOKEN = Deno.env.get('PHASE10_OPERATOR_TOKEN') ?? ''
 const ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('EXTRACTION_ACCEPTANCE_FIXTURE_TOKEN') ?? ''
 const PIPELINE_ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('PIPELINE_ACCEPTANCE_FIXTURE_TOKEN') ?? ''
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? ''
@@ -42,6 +43,15 @@ function persistedExtractionError(error: unknown, timedOut: boolean): { code: st
 
 const headers = { 'content-type': 'application/json', apikey: SERVICE_KEY }
 const response = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function validOperatorMetadata(value: unknown): value is { operator: string; reviewed_at: string; capture_note: string } {
+  if (!isRecord(value)) return false
+  return ['operator', 'reviewed_at', 'capture_note'].every((key) => typeof value[key] === 'string' && value[key].trim().length > 0 && value[key].length <= 2048)
+}
 
 function constantTimeEqual(actual: string, expected: string): boolean {
   const encoder = new TextEncoder()
@@ -148,20 +158,46 @@ serve(async (request) => {
   if (!TRUSTED_TOKEN || !constantTimeEqual(request.headers.get('x-extraction-token') ?? '', TRUSTED_TOKEN)) return response(401, { status: 'permanent_error', error: 'unauthorized' })
   if (!SUPABASE_URL || !SERVICE_KEY || !GEMINI_API_KEY) return response(500, { status: 'permanent_error', error: 'server_not_configured' })
 
-  let body: { source_id?: unknown }
+  let body: { source_id?: unknown; source_fingerprint?: unknown; extractor_version?: unknown; source_before?: unknown; extraction_before?: unknown; operator_metadata?: unknown }
   try { body = await request.json() } catch { return response(400, { status: 'permanent_error', error: 'invalid_json' }) }
   if (typeof body.source_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(body.source_id)) return response(400, { status: 'permanent_error', error: 'invalid_source_id' })
 
-  const rows = await rest(`sources?id=eq.${encodeURIComponent(body.source_id)}&select=id,post_id,post_url,raw_text,normalized_text,content_fingerprint,status&limit=1`) as Array<Record<string, unknown>>
+  const extractionBefore = body['extraction_' + 'before']
+  const phase10Requested = request.headers.get('x-phase10-operator-token') !== null || body.source_before !== undefined || extractionBefore !== undefined || body.operator_metadata !== undefined
+  const phase10Authorized = phase10Requested && !!PHASE10_OPERATOR_TOKEN && !constantTimeEqual(PHASE10_OPERATOR_TOKEN, TRUSTED_TOKEN)
+    && constantTimeEqual(request.headers.get('x-phase10-operator-token') ?? '', PHASE10_OPERATOR_TOKEN)
+  if (phase10Requested && !phase10Authorized) return response(401, { status: 'permanent_error', error: 'unauthorized' })
+  const privileged = phase10Authorized
+  if (privileged && (typeof body.source_fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(body.source_fingerprint)
+    || body.extractor_version !== EXTRACTOR_VERSION || !isRecord(body.source_before) || !isRecord(extractionBefore)
+    || !validOperatorMetadata(body.operator_metadata))) {
+    return response(400, { status: 'permanent_error', error: 'invalid_phase10_request' })
+  }
+
+  const sourceSelect = privileged ? '*' : 'id,post_id,post_url,raw_text,normalized_text,content_fingerprint,status'
+  const rows = await rest(`sources?id=eq.${encodeURIComponent(body.source_id)}&select=${sourceSelect}&limit=1`) as Array<Record<string, unknown>>
   const source = rows[0]
   if (!source) return response(404, { status: 'permanent_error', error: 'source_not_found' })
   const sourceText = typeof source.normalized_text === 'string' ? source.normalized_text : source.raw_text
+  if (privileged && (source.content_fingerprint !== body.source_fingerprint
+    || !isRecord(source.source_metadata) || !isRecord(source.source_metadata.provenance)
+    || JSON.stringify(source.source_metadata.provenance) !== JSON.stringify(body.operator_metadata))) {
+    return response(409, { status: 'permanent_error', error: 'phase10_source_binding_failed' })
+  }
   if (!['active', 'updated', 'postponed'].includes(String(source.status)) || typeof source.content_fingerprint !== 'string' || typeof sourceText !== 'string' || !sourceText.trim()) {
     return response(409, { status: 'permanent_error', error: 'source_ineligible' })
   }
 
   const claimToken = crypto.randomUUID()
-  const claim = await rest('rpc/claim_source_extraction', { method: 'POST', body: JSON.stringify({ p_source_id: body.source_id, p_source_fingerprint: source.content_fingerprint, p_extractor_version: EXTRACTOR_VERSION, p_claim_token: claimToken, p_lease_seconds: LEASE_SECONDS }) }) as Record<string, unknown>
+  let claim: Record<string, unknown>
+  try {
+    claim = await rest(privileged ? 'rpc/claim_phase10_terminal_retry' : 'rpc/claim_source_extraction', { method: 'POST', body: JSON.stringify(privileged ? {
+      p_source_id: body.source_id, p_source_fingerprint: body.source_fingerprint, p_extractor_version: body.extractor_version,
+      p_source_before: body.source_before, p_extraction_before: extractionBefore, p_claim_token: claimToken,
+    } : { p_source_id: body.source_id, p_source_fingerprint: source.content_fingerprint, p_extractor_version: EXTRACTOR_VERSION, p_claim_token: claimToken, p_lease_seconds: LEASE_SECONDS }) }) as Record<string, unknown>
+  } catch {
+    return response(privileged ? 409 : 500, { status: 'permanent_error', error: privileged ? 'phase10_claim_rejected' : 'claim_failed' })
+  }
   if (claim.status !== 'processing' || claim.claim_token !== claimToken) return response(200, { status: claim.status, source_id: body.source_id, cached: claim.status !== 'processing', in_progress: claim.status === 'processing' })
 
   const controller = new AbortController()
@@ -176,7 +212,7 @@ serve(async (request) => {
     }) }) as Record<string, unknown>
     // Narrow, opt-in handoff only. Extraction remains source-local and does not wait
     // for, interpret, or mutate canonical reconciliation outcomes.
-    if (RECONCILE_AFTER_EXTRACTION && RECONCILE_EVENT_TOKEN && status === 'extracted') {
+    if (!privileged && RECONCILE_AFTER_EXTRACTION && RECONCILE_EVENT_TOKEN && status === 'extracted') {
       const candidates = await rest(`events?extracted_source_id=eq.${encodeURIComponent(body.source_id)}&source_fingerprint=eq.${encodeURIComponent(source.content_fingerprint)}&extractor_version=eq.${encodeURIComponent(EXTRACTOR_VERSION)}&select=id`) as Array<{ id?: unknown }>
       const endpoint = `${SUPABASE_URL}/functions/v1/reconcile-event`
       await Promise.all(candidates.filter((candidate) => typeof candidate.id === 'string').map((candidate) => fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'x-reconcile-event-token': RECONCILE_EVENT_TOKEN }, body: JSON.stringify({ candidate_event_id: candidate.id }) }).catch(() => null)))
