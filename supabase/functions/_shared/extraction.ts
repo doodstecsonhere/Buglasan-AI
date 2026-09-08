@@ -10,6 +10,7 @@ export const EVENT_CATEGORIES = [
 
 export const EVENT_STATUSES = ['scheduled', 'confirmed', 'cancelled', 'postponed', 'completed'] as const
 export const FEE_KINDS = ['free', 'paid', 'unknown'] as const
+import type { ExtractionDiagnosticCode } from './providerTypes.ts'
 
 export type ExtractionStatus = typeof EXTRACTION_STATUSES[number]
 export type EventCategory = typeof EVENT_CATEGORIES[number]
@@ -52,6 +53,18 @@ export interface ValidationOutcome {
   reasons: string[]
 }
 
+export class ExtractionDiagnosticError extends Error {
+  readonly diagnostic: ExtractionDiagnosticCode
+  constructor(diagnostic: ExtractionDiagnosticCode, message = 'extraction validation failed') {
+    super(message)
+    this.name = 'ExtractionDiagnosticError'
+    this.diagnostic = diagnostic
+  }
+}
+
+function invalidStructure(message: string): never { throw new ExtractionDiagnosticError('invalid_structure', message) }
+function invalidContent(message: string): never { throw new ExtractionDiagnosticError('invalid_content', message) }
+
 const CANDIDATE_KEYS = [
   'event_name', 'aliases', 'description', 'category', 'start_datetime', 'end_datetime',
   'venue', 'organizer', 'deadline', 'eligibility', 'fee_kind', 'fees', 'contact_info',
@@ -63,25 +76,25 @@ const urlPattern = /^https?:\/\/[^\s]+$/i
 const explicitTimePattern = /(?:\b(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*[ap]m)?\b|\b(?:1[0-2]|0?[1-9])\s*[ap]m\b|\b(?:noon|midnight)\b)/i
 
 function object(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalidStructure(`${label} must be an object`)
   return value as Record<string, unknown>
 }
 
 function nullableString(value: unknown, label: string): string | null {
   if (value === null) return null
-  if (typeof value !== 'string') throw new Error(`${label} must be a string or null`)
+  if (typeof value !== 'string') invalidStructure(`${label} must be a string or null`)
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
 }
 
 function stringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error(`${label} must be a string array`)
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) invalidStructure(`${label} must be a string array`)
   return value.map((item) => item.trim()).filter(Boolean)
 }
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[], label: string, nullable = true): T | null {
   if (value === null && nullable) return null
-  if (typeof value !== 'string' || !allowed.includes(value as T)) throw new Error(`${label} has an invalid enum value`)
+  if (typeof value !== 'string' || !allowed.includes(value as T)) invalidContent(`${label} has an invalid enum value`)
   return value as T
 }
 
@@ -89,44 +102,44 @@ function enumValue<T extends string>(value: unknown, allowed: readonly T[], labe
 export function normalizeManilaTimestamp(value: unknown, label: string): string | null {
   const text = nullableString(value, label)
   if (text === null) return null
-  if (!timestampPattern.test(text)) throw new Error(`${label} must be an ISO timestamp with timezone`)
+  if (!timestampPattern.test(text)) invalidContent(`${label} must be an ISO timestamp with timezone`)
   const date = new Date(text)
-  if (Number.isNaN(date.valueOf())) throw new Error(`${label} is not a real timestamp`)
+  if (Number.isNaN(date.valueOf())) invalidContent(`${label} is not a real timestamp`)
   return date.toISOString()
 }
 
 function validateYear(value: unknown): number | null {
   if (value === null) return null
   if (!Number.isInteger(value) || (value as number) < 1900 || (value as number) > 2100) {
-    throw new Error('festival_year must be a nullable integer from 1900 through 2100')
+    invalidContent('festival_year must be a nullable integer from 1900 through 2100')
   }
   return value as number
 }
 
 function requireUrlIfPresent(value: string | null, label: string): void {
-  if (value && /(?:https?:\/\/|www\.)/i.test(value) && !urlPattern.test(value)) throw new Error(`${label} contains a malformed URL`)
+  if (value && /(?:https?:\/\/|www\.)/i.test(value) && !urlPattern.test(value)) invalidContent(`${label} contains a malformed URL`)
 }
 
 function parseCandidate(value: unknown, sourceText: string, index: number): EventCandidate {
   const row = object(value, `candidates[${index}]`)
   const unknown = Object.keys(row).filter((key) => !(CANDIDATE_KEYS as readonly string[]).includes(key))
   const missing = CANDIDATE_KEYS.filter((key) => !(key in row))
-  if (unknown.length || missing.length) throw new Error(`candidates[${index}] has unknown or missing fields`)
+  if (unknown.length || missing.length) invalidStructure(`candidates[${index}] has unknown or missing fields`)
 
   const evidenceRaw = row.evidence
-  if (!Array.isArray(evidenceRaw)) throw new Error(`candidates[${index}].evidence must be an array`)
+  if (!Array.isArray(evidenceRaw)) invalidStructure(`candidates[${index}].evidence must be an array`)
   const evidence = evidenceRaw.map((item, evidenceIndex) => {
     const entry = object(item, `evidence[${evidenceIndex}]`)
     if (Object.keys(entry).some((key) => !['field', 'excerpt'].includes(key)) || !('field' in entry) || !('excerpt' in entry)) {
-      throw new Error(`evidence[${evidenceIndex}] has unknown or missing fields`)
+      invalidStructure(`evidence[${evidenceIndex}] has unknown or missing fields`)
     }
     const field = nullableString(entry.field, 'evidence.field')
     const excerpt = nullableString(entry.excerpt, 'evidence.excerpt')
-    if (!field || !excerpt) throw new Error('evidence field and excerpt must be non-empty')
+    if (!field || !excerpt) invalidContent('evidence field and excerpt must be non-empty')
     if (!(CANDIDATE_KEYS as readonly string[]).includes(field) || field === 'evidence' || field === 'review_reasons') {
-      throw new Error(`evidence field ${field} is unsupported`)
+      invalidContent(`evidence field ${field} is unsupported`)
     }
-    if (!sourceText.includes(excerpt)) throw new Error(`evidence excerpt is not an exact source substring: ${excerpt}`)
+    if (!sourceText.includes(excerpt)) invalidContent('evidence excerpt is not an exact source substring')
     return { field, excerpt }
   })
 
@@ -136,14 +149,14 @@ function parseCandidate(value: unknown, sourceText: string, index: number): Even
   const deadline = normalizeManilaTimestamp(row.deadline, 'deadline')
   for (const [field, timestamp] of [['start_datetime', start], ['end_datetime', end], ['deadline', deadline]] as const) {
     if (timestamp !== null && !evidence.some((item) => item.field === field && explicitTimePattern.test(item.excerpt))) {
-      throw new Error(`${field} requires evidence with an explicit local time`)
+      invalidContent(`${field} requires evidence with an explicit local time`)
     }
   }
-  if (start && end && new Date(end) < new Date(start)) throw new Error('end_datetime precedes start_datetime')
+  if (start && end && new Date(end) < new Date(start)) invalidContent('end_datetime precedes start_datetime')
   const festivalYear = validateYear(row.festival_year)
   if (festivalYear !== null && start !== null) {
     const manilaYear = Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Manila', year: 'numeric' }).format(new Date(start)))
-    if (manilaYear !== festivalYear) throw new Error('festival_year conflicts with start_datetime in Asia/Manila')
+    if (manilaYear !== festivalYear) invalidContent('festival_year conflicts with start_datetime in Asia/Manila')
   }
   const contact = nullableString(row.contact_info, 'contact_info')
   requireUrlIfPresent(contact, 'contact_info')
@@ -189,11 +202,11 @@ function parseCandidate(value: unknown, sourceText: string, index: number): Even
   for (const field of ['event_name', 'description', 'venue', 'organizer', 'eligibility', 'contact_info'] as const) {
     const value = candidate[field]
     if (value !== null && !evidence.some((item) => item.field === field && item.excerpt.includes(value))) {
-      throw new Error(`${field} is asserted without evidence`)
+      invalidContent(`${field} is asserted without evidence`)
     }
   }
-  if (candidate.fee_kind === 'free' && candidate.fees !== null && !/^free$/i.test(candidate.fees)) throw new Error('free fee_kind conflicts with fees')
-  if (candidate.fee_kind === 'unknown' && candidate.fees !== null) throw new Error('unknown fee_kind requires null fees')
+  if (candidate.fee_kind === 'free' && candidate.fees !== null && !/^free$/i.test(candidate.fees)) invalidContent('free fee_kind conflicts with fees')
+  if (candidate.fee_kind === 'unknown' && candidate.fees !== null) invalidContent('unknown fee_kind requires null fees')
   return candidate
 }
 
@@ -201,7 +214,7 @@ function parseCandidate(value: unknown, sourceText: string, index: number): Even
 export function validateExtractionResult(payload: unknown, sourceText: string): ValidationOutcome {
   const root = object(payload, 'result')
   if (Object.keys(root).some((key) => !['candidates', 'source_summary'].includes(key)) || !Array.isArray(root.candidates) || !('source_summary' in root)) {
-    throw new Error('result has unknown or missing fields')
+    invalidStructure('result has unknown or missing fields')
   }
   const candidates = root.candidates.map((candidate, index) => parseCandidate(candidate, sourceText, index))
   const reasons = new Set<string>()
@@ -210,7 +223,7 @@ export function validateExtractionResult(payload: unknown, sourceText: string): 
       if (['aliases', 'evidence', 'review_reasons'].includes(field)) continue
       const asserted = candidate[field as keyof EventCandidate]
       if (asserted !== null && field !== 'fee_kind' && !candidate.evidence.some((item) => item.field === field)) {
-        throw new Error(`${field} is asserted without evidence`)
+        invalidContent(`${field} is asserted without evidence`)
       }
     }
     if (candidate.event_name === null) reasons.add('candidate_name_missing')
@@ -229,7 +242,7 @@ export function parseModelJson(text: string): unknown {
   try {
     return JSON.parse(trimmed)
   } catch {
-    throw new Error('model returned malformed JSON')
+    throw new ExtractionDiagnosticError('malformed_json')
   }
 }
 

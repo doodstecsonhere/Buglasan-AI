@@ -70,6 +70,6 @@ describe('provider failover foundation', () => {
       model: 'test',
       async generate() { return { text: 'not-json', provider: 'openai_compatible', model: 'test' } },
     }
-    await expect(extractWithFailover('Official event at 10:00 AM', 'unchanged prompt', primary, secondary, { sleep: async () => {} })).rejects.toMatchObject({ provider: 'openai_compatible', category: 'validation_failed' })
+    await expect(extractWithFailover('Official event at 10:00 AM', 'unchanged prompt', primary, secondary, { sleep: async () => {} })).rejects.toMatchObject({ provider: 'openai_compatible', category: 'validation_failed', diagnostic: 'malformed_json' })
   })
 })

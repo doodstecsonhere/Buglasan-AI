@@ -5,6 +5,11 @@ export type ProviderFailureCategory =
   | 'invalid_request' | 'authentication_rejected' | 'permission_denied' | 'model_not_found'
   | 'malformed_output' | 'validation_failed' | 'unknown_provider_error'
 
+export const EXTRACTION_DIAGNOSTIC_CODES = [
+  'malformed_json', 'invalid_structure', 'invalid_content', 'nonretryable_provider', 'unknown_failure',
+] as const
+export type ExtractionDiagnosticCode = typeof EXTRACTION_DIAGNOSTIC_CODES[number]
+
 export interface ProviderRequest { prompt: string; structured?: boolean }
 export interface ProviderResponse { text: string; provider: ProviderName; model: string }
 export interface ProviderAttemptMetadata { provider: ProviderName; model: string; attempts: number; retries: number; failures: string[] }

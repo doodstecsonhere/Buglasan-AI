@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { validateExtractionResult, type ExtractionResult } from '../_shared/extraction.ts'
 import { geminiRestAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
 import { extractWithFailover } from '../_shared/providerExtraction.ts'
+import { isFailoverEligible, safeProviderError } from '../_shared/providerErrors.ts'
+import type { ExtractionDiagnosticCode } from '../_shared/providerTypes.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}')
@@ -25,6 +27,18 @@ const ACCEPTANCE_FIXTURE_VERSION = 'phase6-acceptance-v1'
 // its prior safeGeminiErrorMetadata fields included request_id: result.headers.get('x-goog-request-id').
 
 class TransientExtractionError extends Error {}
+const SAFE_ERROR_MESSAGE = 'extraction failed'
+
+function persistedExtractionError(error: unknown, timedOut: boolean): { code: string; message: string } {
+  if (timedOut) return { code: 'extraction_timeout', message: SAFE_ERROR_MESSAGE }
+  const safe = safeProviderError(error)
+  const diagnostic = safe.diagnostic as ExtractionDiagnosticCode | undefined
+  if (diagnostic) return { code: `extraction_${diagnostic}`, message: SAFE_ERROR_MESSAGE }
+  if (safe.category && safe.category !== 'unknown_provider_error' && !isFailoverEligible(error)) {
+    return { code: 'extraction_nonretryable_provider', message: SAFE_ERROR_MESSAGE }
+  }
+  return { code: 'extraction_unknown_failure', message: SAFE_ERROR_MESSAGE }
+}
 
 const headers = { 'content-type': 'application/json', apikey: SERVICE_KEY }
 const response = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -169,10 +183,10 @@ serve(async (request) => {
     }
     return response(200, { status, source_id: body.source_id, persisted_candidates: persisted.persisted_candidates ?? 0, review_reasons: validated.reasons })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'unknown extraction error'
     const transient = controller.signal.aborted || error instanceof TransientExtractionError
     const status = transient ? 'retryable_error' : 'permanent_error'
-    await rest('rpc/fail_source_extraction', { method: 'POST', body: JSON.stringify({ p_extraction_id: claim.id, p_claim_token: claimToken, p_status: status, p_error_code: controller.signal.aborted ? 'timeout' : 'extraction_failed', p_error_message: message }) })
+    const diagnostic = persistedExtractionError(error, controller.signal.aborted)
+    await rest('rpc/fail_source_extraction', { method: 'POST', body: JSON.stringify({ p_extraction_id: claim.id, p_claim_token: claimToken, p_status: status, p_error_code: diagnostic.code, p_error_message: diagnostic.message }) })
     return response(transient ? 503 : 422, { status, source_id: body.source_id, error: controller.signal.aborted ? 'timeout' : 'extraction_failed' })
   } finally { clearTimeout(timeout) }
 })

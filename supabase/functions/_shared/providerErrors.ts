@@ -1,15 +1,17 @@
-import type { ProviderFailureCategory, ProviderName } from './providerTypes.ts'
+import type { ExtractionDiagnosticCode, ProviderFailureCategory, ProviderName } from './providerTypes.ts'
 
 export class ProviderError extends Error {
   readonly provider: ProviderName
   readonly category: ProviderFailureCategory
   readonly status?: number
-  constructor(provider: ProviderName, category: ProviderFailureCategory, message: string, status?: number) {
+  readonly diagnostic?: ExtractionDiagnosticCode
+  constructor(provider: ProviderName, category: ProviderFailureCategory, message: string, status?: number, diagnostic?: ExtractionDiagnosticCode) {
     super(message)
     this.name = 'ProviderError'
     this.provider = provider
     this.category = category
     this.status = status
+    this.diagnostic = diagnostic
   }
 }
 
@@ -19,7 +21,12 @@ export function isFailoverEligible(error: unknown): boolean {
 }
 
 export function safeProviderError(error: unknown): Record<string, unknown> {
-  if (error instanceof ProviderError) return { provider: error.provider, category: error.category, httpStatus: error.status }
+  if (error instanceof ProviderError) return {
+    provider: error.provider,
+    category: error.category,
+    httpStatus: error.status,
+    ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
+  }
   return { category: 'unknown_provider_error' }
 }
 
