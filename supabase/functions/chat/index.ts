@@ -22,6 +22,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.21.0'
 import {
   buildZeroEvidenceFallback,
+  mapValidatedClaimCitations,
+  resolveLanguage,
   shouldUseZeroEvidenceFallback,
   type SupportedLanguage,
 } from './grounding.ts'
@@ -145,6 +147,7 @@ interface ChatResponse {
     content: string
     timestamp: string
     sources: SourceCitation[]
+    claimCitations?: Array<{ claimIndex: number; sourceId: string; marker: string }>
     festivalYear: number
   }
   retrievedSources: Source[]
@@ -757,18 +760,12 @@ function formatEventsForPrompt(events: Event[]): string {
   }).join('\n\n')
 }
 
-function extractCitations(response: string, sources: Source[]): SourceCitation[] {
+function extractCitations(response: string, sources: Source[]): { citations: SourceCitation[]; claims: ReturnType<typeof mapValidatedClaimCitations>['claims'] } {
   const citations: SourceCitation[] = []
-  const sourceRefs = response.match(/\[Source (\d+)\]/g)
-  if (!sourceRefs) return citations
-
-  const usedIndices = new Set(
-    sourceRefs.map((r) => parseInt(r.match(/\d+/)?.[0] || '0', 10) - 1)
-  )
-
-  for (const idx of usedIndices) {
-    if (idx >= 0 && idx < sources.length) {
-      const s = sources[idx]
+  const mapped = mapValidatedClaimCitations(response, sources)
+  for (const id of mapped.sourceIds) {
+      const s = sources.find((source) => source.id === id)
+      if (!s) continue
       citations.push({
         id: s.id,
         postId: s.post_id,
@@ -781,9 +778,8 @@ function extractCitations(response: string, sources: Source[]): SourceCitation[]
         status: s.status,
         supersedesSourceId: s.supersedes_source_id,
       })
-    }
   }
-  return citations
+  return { citations, claims: mapped.claims }
 }
 
 function detectCorrectionQuery(query: string): boolean {
@@ -816,7 +812,8 @@ serve(async (req) => {
   let diagnostic: DiagnosticReport | undefined
   try {
     const body: ChatRequest = await req.json()
-    const { message, festivalYear, language = 'en', conversationHistory = [] } = body
+    const { message, festivalYear, conversationHistory = [] } = body
+    const language = resolveLanguage(message, body.language ?? 'en')
     const diagnosticRequested = body.diagnostic === true
     const diagnosticAuthorized = diagnosticRequested && isAuthorizedDiagnosticRequest(req)
     // const diagnostic = diagnosticAuthorized ? createDiagnosticReport() : undefined
@@ -985,7 +982,7 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
     }
     const responseText = result.response.text()
 
-    const citations = extractCitations(responseText, evidence.sources)
+    const { citations, claims } = extractCitations(responseText, evidence.sources)
 
     const response: ChatResponse = {
       message: {
@@ -994,6 +991,7 @@ ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it 
         content: responseText,
         timestamp: new Date().toISOString(),
         sources: citations,
+        claimCitations: claims,
         festivalYear: resolvedYear,
       },
       retrievedSources: evidence.sources,

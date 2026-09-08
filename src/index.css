@@ -31,11 +31,14 @@
   
   body {
     @apply bg-neutral-50 text-neutral-900 font-sans antialiased;
+    background-image: radial-gradient(circle at 12% 0%, rgba(229, 62, 62, .08), transparent 28rem), radial-gradient(circle at 100% 100%, rgba(214, 158, 46, .08), transparent 24rem);
   }
   
   html {
     @apply scroll-smooth;
   }
+
+  button, textarea { font: inherit; }
 }
 
 @layer utilities {

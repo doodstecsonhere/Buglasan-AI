@@ -13,7 +13,7 @@
  * for backward compatibility.
  */
 
-import type { Source, Event, FestivalYear, SourceCitation, Platform } from '../types'
+import type { Source, Event, FestivalYear, SourceCitation, ClaimCitation, ChatLanguage } from '../types'
 import { resolveFestivalYear, getCurrentFestivalYear, getCurrentDateInPH } from '../utils/dateUtils'
 import {
   demoSources,
@@ -39,7 +39,7 @@ export interface ChatServiceConfig {
 export interface ChatRequest {
   message: string
   festivalYear?: FestivalYear
-  language?: 'en' | 'ceb' | 'fil'
+  language?: ChatLanguage
   conversationHistory?: Array<{
     role: 'user' | 'assistant' | 'system'
     content: string
@@ -65,12 +65,51 @@ export interface ChatResponse {
     timestamp: string
     sources: SourceCitation[]
     festivalYear: FestivalYear
+    claimCitations?: ClaimCitation[]
   }
   retrievedSources: Source[]
   retrievedEvents: Event[]
   retrievedChunks?: ChunkSummary[]
   yearResolved: FestivalYear
-  language: 'en' | 'ceb' | 'fil'
+  language: ChatLanguage
+}
+
+/** Explicit instructions in the user's message override the UI/request language. */
+export function resolveChatLanguage(message: string, requested: ChatLanguage = 'en'): ChatLanguage {
+  const text = message.toLowerCase()
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(cebuano|bisaya)\b|\b(cebuano|bisaya)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'ceb'
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(filipino|tagalog)\b|\b(filipino|tagalog)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'fil'
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(english)\b|\b(english)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'en'
+  return requested
+}
+
+/**
+ * Resolve only markers that point at the supplied evidence packet. Unknown,
+ * out-of-range, and duplicate references are ignored; no source is attached
+ * merely because it was retrieved.
+ */
+export function mapValidatedCitations(response: string, sources: Source[]): { citations: SourceCitation[]; claimCitations: ClaimCitation[] } {
+  const byId = new Map(sources.map((source) => [source.id, source]))
+  const citations: SourceCitation[] = []
+  const claimCitations: ClaimCitation[] = []
+  const seen = new Set<string>()
+  let claimIndex = 0
+  const add = (id: string, marker: string) => {
+    const source = byId.get(id)
+    if (!source || seen.has(id)) return
+    seen.add(id)
+    citations.push(toSourceCitation(source))
+    claimCitations.push({ claimIndex: claimIndex++, sourceId: id, marker })
+  }
+  for (const match of response.matchAll(/_\(src:\s*([a-zA-Z0-9_-]+)\)_|\[Source\s+(\d+)\]/g)) {
+    if (match[1]) add(match[1], match[0])
+    else add(sources[Number(match[2]) - 1]?.id ?? '', match[0])
+  }
+  return { citations, claimCitations }
+}
+
+function toSourceCitation(s: Source): SourceCitation {
+  return { id: s.id, title: s.title ?? (stripDemoMarker(s.normalizedText ?? s.rawText ?? '').substring(0, 100) || 'Untitled source'), platform: s.platform, postUrl: s.postUrl, publishedAt: s.publishedAt, festivalYear: s.festivalYear, status: s.status, supersedesSourceId: s.supersedesSourceId }
 }
 
 /**
@@ -152,7 +191,8 @@ class ChatService {
   // ===========================================================================
 
   private async sendMessageDemo(request: ChatRequest, festivalYear: FestivalYear): Promise<ChatResponse> {
-    const { message, language = 'en' } = request
+    const { message } = request
+    const language = resolveChatLanguage(message, request.language ?? 'en')
 
     await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 400))
 
@@ -161,7 +201,7 @@ class ChatService {
     const yearEvents = getCurrentEventsForYear(festivalYear)
 
     const responseContent = this.generateDemoResponse(message, festivalYear, yearSources, yearEvents, language)
-    const citations = this.extractCitations(responseContent, yearSources)
+    const { citations, claimCitations } = mapValidatedCitations(responseContent, yearSources)
 
     return {
       message: {
@@ -171,6 +211,7 @@ class ChatService {
         timestamp: new Date().toISOString(),
         sources: citations,
         festivalYear,
+        claimCitations,
       },
       retrievedSources: yearSources,
       retrievedEvents: yearEvents,
@@ -254,11 +295,11 @@ class ChatService {
     const lang = t[language] || t.en
 
     // ---------- Detect intent (keyword-based, simple) ----------
-    const wantsSchedule = /\b(schedule|what\s+events|when|what\s+is\s+happening|lineup)\b/.test(lowerQuery)
-    const wantsVenue = /\b(venue|where|location|place)\b/.test(lowerQuery)
-    const wantsHistory = /\b(history|origin|meaning|buglas|about|tell\s+me\s+about)\b/.test(lowerQuery)
-    const wantsRegister = /\b(register|join|participate|sign\s+up|deadline|how\s+to)\b/.test(lowerQuery)
-    const wantsFood = /\b(food|delicac|eat|fair|cuisine)\b/.test(lowerQuery)
+    const wantsSchedule = /\b(schedule|what\s+events|when|what\s+is\s+happening|lineup|iskedyul|kalihokan|kanus-a|kaganapan)\b/.test(lowerQuery)
+    const wantsVenue = /\b(venue|where|location|place|asa|lugar|saan)\b/.test(lowerQuery)
+    const wantsHistory = /\b(history|origin|meaning|buglas|about|tell\s+me\s+about|kasaysayan|tradisyon|tungkol)\b/.test(lowerQuery)
+    const wantsRegister = /\b(register|join|participate|sign\s+up|deadline|how\s+to|rehistro|pagpaparehistro)\b/.test(lowerQuery)
+    const wantsFood = /\b(food|delicac|eat|fair|cuisine|pagkaon|pagkain)\b/.test(lowerQuery)
     const wantsUpcoming = /\b(upcoming|coming|soon|next|future|forward)\b/.test(lowerQuery)
     const wantsSupersession = /\b(change|update|supersed|moved|relocated|new\s+venue|correction)\b/.test(lowerQuery)
 
@@ -311,7 +352,7 @@ class ChatService {
         return `${lang.registrationHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
       }
 
-      return `${lang.registrationHeader(year)}\n\n${stripDemoMarker(regSource.normalizedText ?? regSource.rawText ?? '')}\n\n[Source]\n\n${lang.scheduleNote}`
+      return `${lang.registrationHeader(year)}\n\n${stripDemoMarker(regSource.normalizedText ?? regSource.rawText ?? '')} _(src: ${regSource.id})_\n\n${lang.scheduleNote}`
     }
 
     // ---------- Food fair demo ----------
@@ -322,7 +363,7 @@ class ChatService {
         return `${lang.foodHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
       }
 
-      return `${lang.foodHeader(year)}\n\n${stripDemoMarker(foodSource.normalizedText ?? foodSource.rawText ?? '')}\n\n[Source]\n\n${lang.scheduleNote}`
+      return `${lang.foodHeader(year)}\n\n${stripDemoMarker(foodSource.normalizedText ?? foodSource.rawText ?? '')} _(src: ${foodSource.id})_\n\n${lang.scheduleNote}`
     }
 
     // ---------- Upcoming demo (temporal filtering) ----------
@@ -411,47 +452,6 @@ class ChatService {
     }
 
     return `${lang.noInfo(year)}\n\n${lang.suggestion(year)}\n\n${lang.scheduleNote}`
-  }
-
-  private extractCitations(response: string, sources: Source[]): SourceCitation[] {
-    const citations: SourceCitation[] = []
-
-    // The response may contain either "[Source]" (whole-document cite) or
-    // explicit "_(src: <id>)_" markers (per-claim cite). Handle both.
-    const sourceIdsFromMarkers = new Set<string>()
-    const srcMarkerRe = /_\(src:\s*([a-zA-Z0-9_-]+)\)_/g
-    let m: RegExpExecArray | null
-    while ((m = srcMarkerRe.exec(response)) !== null) {
-      sourceIdsFromMarkers.add(m[1])
-    }
-
-    const usesGenericSource = /\[Source\]/.test(response)
-
-    if (usesGenericSource && sourceIdsFromMarkers.size === 0) {
-      for (const s of sources) {
-        citations.push(this.toCitation(s))
-      }
-    } else if (sourceIdsFromMarkers.size > 0) {
-      for (const id of sourceIdsFromMarkers) {
-        const s = sources.find(src => src.id === id) ?? demoSources.find(src => src.id === id)
-        if (s) citations.push(this.toCitation(s))
-      }
-    }
-
-    return citations
-  }
-
-  private toCitation(s: Source): SourceCitation {
-    return {
-      id: s.id,
-      title: s.title ?? (stripDemoMarker(s.normalizedText ?? s.rawText ?? '').substring(0, 100) || 'Untitled source'),
-      platform: s.platform as Platform,
-      postUrl: s.postUrl,
-      publishedAt: s.publishedAt,
-      festivalYear: s.festivalYear,
-      status: s.status,
-      supersedesSourceId: s.supersedesSourceId,
-    }
   }
 
   // ===========================================================================

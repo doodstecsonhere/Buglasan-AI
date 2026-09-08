@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ChatService } from './chatService'
+import { ChatService, mapValidatedCitations, resolveChatLanguage } from './chatService'
 import { currentYear, previousYear, demoSources } from '../data/demoData'
 
 // We don't mock the date — the demo data is built around `currentYear`,
@@ -174,6 +174,25 @@ describe('ChatService (demo mode)', () => {
     // Sanity: the year the dataset was built around matches the runtime year.
     expect(currentFestivalYear).toBe(currentYear)
     expect(currentYear).toBe(previousYear + 1)
+  })
+
+  it.each([
+    ['English', 'Please answer in English', 'en'],
+    ['Cebuano', 'Palihog tubag in Cebuano/Bisaya', 'ceb'],
+    ['Filipino', 'Please reply in Filipino/Tagalog', 'fil'],
+  ])('explicit %s instruction overrides requested language', (_name, message, expected) => {
+    expect(resolveChatLanguage(message, 'en')).toBe(expected)
+  })
+
+  it('maps only deduplicated citations to retrieved source records', () => {
+    const sources = demoSources.slice(0, 2)
+    const mapped = mapValidatedCitations(`Claim _(src: ${sources[0].id})_ [Source 2] [Source 99] _(src: unknown)_ _(src: ${sources[0].id})_`, sources)
+    expect(mapped.citations.map((citation) => citation.id)).toEqual([sources[0].id, sources[1].id])
+    expect(mapped.claimCitations).toHaveLength(2)
+  })
+
+  it('does not attach all retrieved sources for an unmarked response', () => {
+    expect(mapValidatedCitations('A claim with no citation.', demoSources.slice(0, 2)).citations).toEqual([])
   })
 })
 

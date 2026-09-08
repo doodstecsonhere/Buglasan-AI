@@ -67,6 +67,7 @@ export type EventCategory =
 export type EventStatus = 'scheduled' | 'confirmed' | 'cancelled' | 'postponed' | 'completed'
 
 export type MessageRole = 'user' | 'assistant' | 'system'
+export type ChatLanguage = 'en' | 'ceb' | 'fil'
 
 export interface Source {
   id: string
@@ -139,6 +140,7 @@ export interface Message {
   sources?: SourceCitation[]
   festivalYear?: FestivalYear
   metadata?: Record<string, unknown>
+  claimCitations?: ClaimCitation[]
 }
 
 export interface SourceCitation {
@@ -153,10 +155,17 @@ export interface SourceCitation {
   // isCurrent derived from status
 }
 
+/** A validated mapping from one answer claim marker to an actual retrieved source. */
+export interface ClaimCitation {
+  claimIndex: number
+  sourceId: string
+  marker: string
+}
+
 export interface ChatRequest {
   message: string
   festivalYear?: FestivalYear
-  language?: 'en' | 'ceb' | 'fil'
+  language?: ChatLanguage
   conversationHistory?: Message[]
 }
 
@@ -165,7 +174,7 @@ export interface ChatResponse {
   retrievedSources: Source[]
   retrievedEvents: Event[]
   yearResolved: FestivalYear
-  language: 'en' | 'ceb' | 'fil'
+  language: ChatLanguage
 }
 
 export interface RetrievalQuery {

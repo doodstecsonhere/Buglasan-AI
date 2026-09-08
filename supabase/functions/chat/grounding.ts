@@ -1,5 +1,51 @@
 export type SupportedLanguage = 'en' | 'ceb' | 'fil'
 
+export interface GroundingSourceRecord {
+  id: string
+  post_id: string
+  normalized_text: string | null
+  raw_text: string | null
+  platform: string
+  post_url: string
+  published_at: string | null
+  festival_year: number | null
+  is_current: boolean
+  status: string
+  supersedes_source_id?: string
+}
+
+export interface ValidatedClaimCitation {
+  claimIndex: number
+  sourceId: string
+  marker: string
+}
+
+/** Explicit language instructions in the message take precedence over UI state. */
+export function resolveLanguage(message: string, requested: SupportedLanguage = 'en'): SupportedLanguage {
+  const text = message.toLowerCase()
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(cebuano|bisaya)\b|\b(cebuano|bisaya)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'ceb'
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(filipino|tagalog)\b|\b(filipino|tagalog)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'fil'
+  if (/\b(in|use|reply|respond|answer|speak|write)\b[^.!?\n]{0,30}\b(english)\b|\b(english)\b[^.!?\n]{0,20}\b(reply|answer|please)\b/.test(text)) return 'en'
+  return requested
+}
+
+/** Map only explicit, valid markers to retrieved records. */
+export function mapValidatedClaimCitations(response: string, sources: readonly GroundingSourceRecord[]): { sourceIds: string[]; claims: ValidatedClaimCitation[] } {
+  const byId = new Map(sources.map((source) => [source.id, source]))
+  const sourceIds: string[] = []
+  const claims: ValidatedClaimCitation[] = []
+  const seen = new Set<string>()
+  let claimIndex = 0
+  for (const match of response.matchAll(/_\(src:\s*([a-zA-Z0-9_-]+)\)_|\[Source\s+(\d+)\]/g)) {
+    const sourceId = match[1] ?? sources[Number(match[2]) - 1]?.id
+    if (!sourceId || !byId.has(sourceId) || seen.has(sourceId)) continue
+    seen.add(sourceId)
+    sourceIds.push(sourceId)
+    claims.push({ claimIndex: claimIndex++, sourceId, marker: match[0] })
+  }
+  return { sourceIds, claims }
+}
+
 export interface EvidencePresence {
   sources: readonly unknown[]
   events: readonly unknown[]

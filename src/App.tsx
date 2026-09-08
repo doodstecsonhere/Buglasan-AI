@@ -1,227 +1,85 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatInterface } from './components/ChatInterface'
 import { FacebookBadge } from './components/FacebookBadge'
+import { ChatHistoryDrawer } from './components/ChatHistoryDrawer'
 import { AIDisclaimer } from './components/AIDisclaimer'
-import type { Message, FestivalYear } from './types'
+import type { Message } from './types'
 import { getCurrentFestivalYear } from './utils/dateUtils'
 import { demoMessages, demoQuickQuestions } from './data/demoData'
 import { chatService } from './services'
+import { createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, type ChatThread } from './utils/chatThreads'
 
 function App() {
-  const [messages, setMessages] = useState<Message[]>(demoMessages)
+  const festivalYear = getCurrentFestivalYear()
+  const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads())
+  const [activeThreadId, setActiveThreadId] = useState(() => loadChatThreads()[0]?.id ?? '')
+  const [messages, setMessages] = useState<Message[]>(() => loadChatThreads()[0]?.messages ?? demoMessages)
   const [isLoading, setIsLoading] = useState(false)
-  const [festivalYear, setFestivalYear] = useState<FestivalYear>(getCurrentFestivalYear())
-  const [showYearSelector, setShowYearSelector] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const activeThreadRef = useRef(activeThreadId)
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  useEffect(() => { saveChatThreads(threads) }, [threads])
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  const persistMessages = useCallback((nextMessages: Message[]) => {
+    setMessages(nextMessages)
+    setThreads(previous => {
+      const currentId = activeThreadRef.current
+      const existing = previous.find(thread => thread.id === currentId)
+      const next = existing
+        ? previous.map(thread => thread.id === currentId ? { ...thread, messages: nextMessages, title: titleFromMessages(nextMessages), updatedAt: new Date().toISOString() } : thread)
+        : [createChatThread(nextMessages), ...previous]
+      if (!existing && next[0]) { activeThreadRef.current = next[0].id; setActiveThreadId(next[0].id) }
+      return next
+    })
   }, [])
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages, scrollToBottom])
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: content.trim(),
-      timestamp: new Date(),
-    }
-
-    setMessages(prev => [...prev, userMessage])
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), timestamp: new Date() }
+    const history = [...messages, userMessage]
+    persistMessages(history)
     setIsLoading(true)
-
     try {
-      const response = await chatService.sendMessage({
-        message: content,
-        festivalYear,
-        language: 'en',
-        conversationHistory: messages.slice(-6).map(m => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp.toISOString(),
-          sources: m.sources,
-        })),
-      })
-
-      const aiMessage: Message = {
-        id: response.message.id,
-        role: 'assistant',
-        content: response.message.content,
-        timestamp: new Date(response.message.timestamp),
-        sources: response.message.sources,
-        festivalYear: response.message.festivalYear,
-      }
-
-      setMessages(prev => [...prev, aiMessage])
+      const language = getPreferredChatLanguage()
+      const response = await chatService.sendMessage({ message: content, festivalYear, language, conversationHistory: messages.slice(-6).map(m => ({ ...m, timestamp: m.timestamp.toISOString() })) })
+      persistMessages([...history, { id: response.message.id, role: 'assistant', content: response.message.content, timestamp: new Date(response.message.timestamp), sources: response.message.sources, festivalYear: response.message.festivalYear, claimCitations: response.message.claimCitations }])
     } catch (error) {
       console.error('Chat error:', error)
-      const errorMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again or check the official Buglasan Festival Facebook Page for the latest information.',
-        timestamp: new Date(),
-        festivalYear,
-      }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [isLoading, messages, festivalYear])
+      persistMessages([...history, { id: crypto.randomUUID(), role: 'assistant', content: 'Sorry, I encountered an error. Please try again or check the official Buglasan Festival Facebook Page for the latest information.', timestamp: new Date(), festivalYear }])
+    } finally { setIsLoading(false) }
+  }, [festivalYear, isLoading, messages, persistMessages])
 
-  const handleQuickQuestion = useCallback((question: string) => {
-    handleSendMessage(question)
-  }, [handleSendMessage])
+  const newChat = useCallback(() => { activeThreadRef.current = ''; setActiveThreadId(''); setMessages([]); setHistoryOpen(false) }, [])
+  const selectThread = useCallback((id: string) => { const thread = threads.find(item => item.id === id); if (thread) { activeThreadRef.current = id; setActiveThreadId(id); setMessages(thread.messages); setHistoryOpen(false) } }, [threads])
+  const deleteThread = useCallback((id: string) => { setThreads(previous => previous.filter(thread => thread.id !== id)); if (id === activeThreadId) newChat() }, [activeThreadId, newChat])
 
-  const handleYearChange = useCallback((year: FestivalYear) => {
-    setFestivalYear(year)
-    setShowYearSelector(false)
-    // Clear messages and show welcome for new year
-    setMessages(demoMessages)
-  }, [])
-
-  return (
-    <div className="min-h-screen bg-neutral-50 flex flex-col">
-      {/* Facebook Badge Header */}
-      <FacebookBadge />
-
-      {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Year Selector Bar */}
-        <div className="bg-white border-b border-neutral-200 px-4 py-2">
-          <div className="max-w-2xl mx-auto">
-            <button
-              onClick={() => setShowYearSelector(!showYearSelector)}
-              className="flex items-center gap-2 text-sm font-medium text-fiesta-red hover:text-fiesta-red-dark transition-colors"
-              aria-expanded={showYearSelector}
-              aria-controls="year-selector-menu"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>Festival Year: {festivalYear}</span>
-              <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showYearSelector && (
-              <div id="year-selector-menu" className="mt-2 animate-slide-up">
-                <div className="bg-white border border-neutral-200 rounded-lg shadow-lg overflow-hidden">
-                  {chatService.getAvailableYears().map(year => (
-                    <button
-                      key={year}
-                      onClick={() => handleYearChange(year)}
-                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                        festivalYear === year
-                          ? 'bg-fiesta-red text-white'
-                          : 'text-neutral-700 hover:bg-fiesta-red-light'
-                      }`}
-                    >
-                      {year} {year === getCurrentFestivalYear() && '(Current)'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 max-w-2xl mx-auto w-full">
-          <ChatInterface
-            messages={messages}
-            isLoading={isLoading}
-            festivalYear={festivalYear}
-            messagesEndRef={messagesEndRef}
-          />
-        </div>
-
-        {/* Quick Question Chips */}
-        <div className="px-4 pb-4 max-w-2xl mx-auto w-full">
-          <div className="flex flex-wrap gap-2">
-            {demoQuickQuestions.map((question, index) => (
-              <button
-                key={index}
-                onClick={() => handleQuickQuestion(question)}
-                disabled={isLoading}
-                className="px-3 py-1.5 text-sm bg-white border border-neutral-200 rounded-full text-neutral-700 hover:bg-fiesta-red-light hover:border-fiesta-red hover:text-fiesta-red transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {question}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Input Area */}
-        <div className="bg-white border-t border-neutral-200 px-4 py-3 max-w-2xl mx-auto w-full">
-          <MessageInput
-            onSend={handleSendMessage}
-            disabled={isLoading}
-            placeholder={`Ask about Buglasan Festival ${festivalYear}...`}
-          />
-        </div>
+  return <div className="min-h-screen bg-neutral-50 text-slate-900">
+    <FacebookBadge />
+    <div className="mx-auto flex min-h-[calc(100vh-48px)] max-w-7xl">
+      <ChatHistoryDrawer threads={threads} activeThreadId={activeThreadId} open={historyOpen} onClose={() => setHistoryOpen(false)} onNew={newChat} onSelect={selectThread} onDelete={deleteThread} />
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="border-b border-neutral-200 bg-white/90 px-4 py-4 backdrop-blur sm:px-6"><div className="mx-auto flex max-w-3xl items-center justify-between"><div className="flex items-center gap-3"><button onClick={() => setHistoryOpen(true)} className="rounded-xl border border-neutral-200 p-2 text-slate-700 hover:bg-neutral-50 md:hidden" aria-label="Open chat history">☰</button><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-fiesta-red">Buglasan AI</p><h1 className="text-lg font-bold sm:text-xl">Your festival companion</h1></div></div><span className="hidden rounded-full bg-fiesta-red-light/30 px-3 py-1.5 text-xs font-semibold text-fiesta-red-dark sm:block">{festivalYear} festival guide</span></div></div>
+        <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"><div className="mx-auto max-w-3xl"><ChatInterface messages={messages} isLoading={isLoading} festivalYear={festivalYear} messagesEndRef={messagesEndRef} /></div></div>
+        <div className="mx-auto w-full max-w-3xl px-4 pb-3 sm:px-6"><div className="flex flex-wrap gap-2">{demoQuickQuestions.map((question, index) => <button key={index} onClick={() => handleSendMessage(question)} disabled={isLoading} className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 shadow-sm transition hover:border-fiesta-red hover:text-fiesta-red disabled:opacity-50">{question}</button>)}</div></div>
+        <div className="border-t border-neutral-200 bg-white px-4 py-3 sm:px-6"><div className="mx-auto max-w-3xl"><MessageInput onSend={handleSendMessage} disabled={isLoading} placeholder={`Ask about Buglasan Festival ${festivalYear}...`} /></div></div>
       </main>
-
-      {/* AI Disclaimer Footer */}
-      <AIDisclaimer />
     </div>
-  )
+    <AIDisclaimer />
+  </div>
 }
 
-function MessageInput({ onSend, disabled, placeholder }: { 
-  onSend: (content: string) => void
-  disabled: boolean
-  placeholder: string
-}) {
+function getPreferredChatLanguage(): 'en' | 'ceb' | 'fil' {
+  const browserLanguage = typeof navigator === 'undefined' ? '' : navigator.language.toLowerCase()
+  if (browserLanguage.startsWith('fil') || browserLanguage.startsWith('tl')) return 'fil'
+  return 'en'
+}
+
+function MessageInput({ onSend, disabled, placeholder }: { onSend: (content: string) => void; disabled: boolean; placeholder: string }) {
   const [value, setValue] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (value.trim() && !disabled) {
-      onSend(value)
-      setValue('')
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit(e)
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        placeholder={placeholder}
-        rows={1}
-        className="flex-1 px-4 py-2.5 bg-neutral-50 border border-neutral-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-fiesta-red focus:border-transparent resize-none min-h-[44px] disabled:opacity-50"
-        style={{ maxHeight: '120px' }}
-      />
-      <button
-        type="submit"
-        disabled={disabled || !value.trim()}
-        className="p-2.5 bg-fiesta-red text-white rounded-full hover:bg-fiesta-red-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-        aria-label="Send message"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-        </svg>
-      </button>
-    </form>
-  )
+  const handleSubmit = (event: React.FormEvent) => { event.preventDefault(); if (value.trim() && !disabled) { onSend(value); setValue('') } }
+  return <form onSubmit={handleSubmit} className="flex gap-2"><textarea value={value} onChange={event => setValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSubmit(event) } }} disabled={disabled} placeholder={placeholder} rows={1} className="min-h-[46px] flex-1 resize-none rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm outline-none focus:border-fiesta-red focus:ring-2 focus:ring-fiesta-red/20 disabled:opacity-50" /><button type="submit" disabled={disabled || !value.trim()} className="rounded-2xl bg-fiesta-red px-4 text-white shadow-sm transition hover:bg-fiesta-red-dark disabled:cursor-not-allowed disabled:opacity-50" aria-label="Send message">➤</button></form>
 }
 
 export default App

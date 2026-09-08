@@ -1,4 +1,4 @@
-import type { Message } from '../types'
+import type { Message, SourceCitation } from '../types'
 import { formatRelativeTime } from '../utils/dateUtils'
 
 interface MessageBubbleProps {
@@ -29,7 +29,7 @@ export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubb
             }
           `}
         >
-          {message.content}
+          {renderCitedContent(message.content, message.sources ?? [])}
         </div>
         
         <div className={`flex items-center gap-1.5 mt-1 text-xs text-neutral-400 ${isUser ? 'justify-end pr-1' : 'justify-start pl-1'}`}>
@@ -49,4 +49,34 @@ export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubb
       )}
     </div>
   )
+}
+
+function renderCitedContent(content: string, sources: SourceCitation[]) {
+  const sourceById = new Map(sources.map((source) => [source.id, source]))
+  const parts = content.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[Source\s+\d+\])/g)
+
+  return parts.map((part, index) => {
+    const idMatch = part.match(/^_\(src:\s*([a-zA-Z0-9_-]+)\)_$/)
+    const numberMatch = part.match(/^\[Source\s+(\d+)\]$/)
+    const source = idMatch
+      ? sourceById.get(idMatch[1])
+      : numberMatch
+        ? sources[Number(numberMatch[1]) - 1]
+        : undefined
+
+    if (!source) return <span key={`${part}-${index}`}>{part}</span>
+    return (
+      <a
+        key={`${source.id}-${index}`}
+        href={source.postUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ml-1 inline-flex align-super text-xs font-semibold text-fiesta-red underline-offset-2 hover:underline"
+        aria-label={`Open source: ${source.title}`}
+        title={source.title}
+      >
+        [{sources.indexOf(source) + 1}]
+      </a>
+    )
+  })
 }

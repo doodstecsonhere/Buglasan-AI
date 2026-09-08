@@ -32,11 +32,11 @@ export function ChatInterface({ messages, isLoading, festivalYear, messagesEndRe
     <div className="flex flex-col gap-3">
       {messages.map((message, index) => (
         <div key={message.id} className="animate-fade-in">
-          <MessageBubble 
-            message={message} 
+            <MessageBubble
+              message={message}
             festivalYear={festivalYear}
-            showAvatar={index === 0 || messages[index - 1]?.role !== message.role}
-          />
+              showAvatar={index === 0 || messages[index - 1]?.role !== message.role}
+            />
           
           {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
             <SourcesCard 
