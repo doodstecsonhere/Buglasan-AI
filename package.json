@@ -17,6 +17,7 @@
     "source:acceptance": "node --experimental-strip-types scripts/source-collector-live.ts --acceptance",
     "source:cleanup": "node --experimental-strip-types scripts/source-collector-live.ts --cleanup",
     "phase10:manifest": "node --experimental-strip-types scripts/phase10-manifest-intake.ts --validate",
+    "phase10:corpus-inspect": "node --experimental-strip-types scripts/phase10-corpus-inspect.ts",
     "phase10:status": "node --experimental-strip-types scripts/phase10-status.ts",
     "phase10:terminal-recovery": "node --experimental-strip-types scripts/phase10-terminal-recovery-live.ts",
     "extraction:acceptance": "node --experimental-strip-types scripts/knowledge-extraction-live.ts --acceptance",
