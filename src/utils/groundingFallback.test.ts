@@ -44,12 +44,12 @@ describe('zero-evidence grounding fallback', () => {
     expect(shouldUseZeroEvidenceFallback(query, emptyEvidence)).toBe(true)
   })
 
-  it('does not use the fallback when any usable official evidence exists', () => {
+  it('uses the fallback when only unrelated canonical event rows exist', () => {
     expect(shouldUseZeroEvidenceFallback('What is the schedule?', {
       sources: [],
       events: [{ id: 'official-event' }],
       chunks: [],
-    })).toBe(false)
+    })).toBe(true)
   })
 
   it.each([

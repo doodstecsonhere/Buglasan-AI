@@ -20,6 +20,27 @@ export interface ValidatedClaimCitation {
   marker: string
 }
 
+/**
+ * A citation is a public payload, not merely an internal retrieval reference.
+ * Do not attach malformed or non-linkable records just because a model emitted
+ * a syntactically valid marker.
+ */
+export function isValidCitationSource(source: unknown): source is GroundingSourceRecord {
+  if (!source || typeof source !== 'object') return false
+  const record = source as Record<string, unknown>
+  if (typeof record.id !== 'string' || !record.id.trim()) return false
+  if (typeof record.post_id !== 'string' || !record.post_id.trim()) return false
+  if (typeof record.post_url !== 'string' || !record.post_url.trim()) return false
+  if (typeof record.platform !== 'string' || !record.platform.trim()) return false
+  if (typeof record.festival_year !== 'number' || !Number.isInteger(record.festival_year)) return false
+  try {
+    const url = new URL(record.post_url)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
 /** Explicit language instructions in the message take precedence over UI state. */
 export function resolveLanguage(message: string, requested: SupportedLanguage = 'en'): SupportedLanguage {
   const text = message.toLowerCase()
@@ -31,12 +52,15 @@ export function resolveLanguage(message: string, requested: SupportedLanguage = 
 
 /** Map only explicit, valid markers to retrieved records. */
 export function mapValidatedClaimCitations(response: string, sources: readonly GroundingSourceRecord[]): { sourceIds: string[]; claims: ValidatedClaimCitation[] } {
-  const byId = new Map(sources.map((source) => [source.id, source]))
+  const validSources = sources.filter(isValidCitationSource)
+  const byId = new Map(validSources.map((source) => [source.id, source]))
   const sourceIds: string[] = []
   const claims: ValidatedClaimCitation[] = []
   const seen = new Set<string>()
   let claimIndex = 0
-  for (const match of response.matchAll(/_\(src:\s*([a-zA-Z0-9_-]+)\)_|\[Source\s+(\d+)\]/g)) {
+  for (const match of response.matchAll(/_\(src:\s*([a-zA-Z0-9_-]+)\)_|\[source\s+(\d+)\]/gi)) {
+    // Positional citations are interpreted against the exact prompt source
+    // ordering, then rejected unless their target is safe for the public API.
     const sourceId = match[1] ?? sources[Number(match[2]) - 1]?.id
     if (!sourceId || !byId.has(sourceId) || seen.has(sourceId)) continue
     seen.add(sourceId)
@@ -87,7 +111,11 @@ export function isFestivalInformationQuery(query: string): boolean {
 }
 
 export function hasUsableEvidence(evidence: EvidencePresence): boolean {
-  return evidence.sources.length > 0 || evidence.events.length > 0 || evidence.chunks.length > 0
+  // `get_festival_events` returns the year's canonical rows and is not a
+  // semantic query matcher. Treating any such row as evidence allows an
+  // unsupported factual question to bypass the refusal path. A source/chunk is
+  // required because it is query-relevant, independently attributable evidence.
+  return evidence.sources.length > 0 || evidence.chunks.length > 0
 }
 
 export function shouldUseZeroEvidenceFallback(query: string, evidence: EvidencePresence): boolean {
@@ -107,4 +135,25 @@ export function buildZeroEvidenceFallback(year: number, language: SupportedLangu
   }
 
   return messages[language]
+}
+
+/** Server-side wording rule for inclusive calendar-date calculations. */
+export function buildInclusiveDateArithmeticGuidance(language: SupportedLanguage): string {
+  if (language === 'fil') {
+    return 'Para sa Filipino/Tagalog na tanong tungkol sa bilang ng araw sa pagitan ng dalawang petsa, bilangin ang parehong unang at huling petsa. Halimbawa, Oktubre 10 hanggang Oktubre 12 ay "3 araw lahat (kasama ang Oktubre 10 at Oktubre 12)"; huwag tawaging 2 araw.'
+  }
+  return 'For calendar-date duration questions, count both the start and end dates unless the user explicitly asks for elapsed time.'
+}
+
+const LEXICAL_STOP_WORDS = new Set([
+  'about', 'after', 'before', 'buglasan', 'current', 'event', 'festival',
+  'from', 'information', 'schedule', 'their', 'there', 'these', 'this',
+  'where', 'which', 'with', 'when', 'what', 'will', 'year',
+])
+
+/** Extract proper-noun candidates for exact-year lexical retrieval fallback. */
+export function getLexicalEvidenceTerms(query: string): string[] {
+  return [...new Set((query.toLowerCase().match(/[\p{L}\p{N}]{5,}/gu) ?? [])
+    .filter((term) => !LEXICAL_STOP_WORDS.has(term)))]
+    .slice(0, 3)
 }

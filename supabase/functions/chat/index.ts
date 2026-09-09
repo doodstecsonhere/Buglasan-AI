@@ -22,6 +22,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.21.0'
 import {
   buildZeroEvidenceFallback,
+  buildInclusiveDateArithmeticGuidance,
+  getLexicalEvidenceTerms,
   mapValidatedClaimCitations,
   resolveLanguage,
   shouldUseZeroEvidenceFallback,
@@ -56,8 +58,8 @@ interface SourceCitation {
   title: string
   platform: string
   postUrl: string
-  publishedAt: string
-  festivalYear: number
+  publishedAt: string | null
+  festivalYear: number | null
   isCurrent: boolean
   status: string
   supersedesSourceId?: string
@@ -642,6 +644,31 @@ async function retrieveEvidence(
   }
   let sources = Array.from(sourceById.values()).slice(0, limits.maxSources)
 
+  // A corpus announcement can be authoritative yet fall just below semantic
+  // similarity for a short proper-noun query (for example, "Pandanyag").
+  // Supplement only an otherwise empty semantic result with an exact-year,
+  // current, lexical source match. This neither changes corpus data nor falls
+  // back across years, and the returned source preserves its original identity.
+  if (sources.length === 0) {
+    for (const term of getLexicalEvidenceTerms(query)) {
+      try {
+        const { data, error } = await supabase
+          .from('sources')
+          .select('id, platform, post_id, post_url, published_at, festival_year, raw_text, normalized_text, is_current, status, supersedes_source_id, ingested_at, updated_at')
+          .eq('festival_year', festivalYear)
+          .eq('is_current', true)
+          .in('status', ['active', 'updated', 'postponed'])
+          .ilike('normalized_text', `%${term}%`)
+          .limit(limits.maxSources)
+        if (error || !Array.isArray(data)) continue
+        sources = data as Source[]
+        if (sources.length > 0) break
+      } catch (error) {
+        console.warn('Lexical source fallback failed:', error)
+      }
+    }
+  }
+
   // Step 5: Optionally walk supersession chains. We only do this when the
   // user is asking an explicit correction/lineage question, to avoid extra
   // round-trips on every query.
@@ -769,7 +796,7 @@ function extractCitations(response: string, sources: Source[]): { citations: Sou
       citations.push({
         id: s.id,
         postId: s.post_id,
-        title: s.normalized_text.substring(0, 100),
+        title: (s.normalized_text ?? s.raw_text ?? 'Official Buglasan source').replace(/\s+/g, ' ').trim().substring(0, 100) || 'Official Buglasan source',
         platform: s.platform,
         postUrl: s.post_url,
         publishedAt: s.published_at,
@@ -960,6 +987,7 @@ Answer the user's query using ONLY the provided sources and events.
 ${temporalContext ? '- Note: Events have been pre-filtered based on temporal expressions in the query. Reference this filtering in your answer.' : ''}
 ${isHistoricalRequest ? `- Note: The user explicitly asked for FY${resolvedYear}. If that year has no current data, say so honestly rather than substituting the current year.` : ''}
 ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it to explain what changed and when, but do not invent details about sources not in the chain.' : ''}
+${buildInclusiveDateArithmeticGuidance(language)}
 - If a source status is "superseded" or "cancelled" or "archived", do NOT cite it as current — it is included only for lineage context.`
 
     let result
