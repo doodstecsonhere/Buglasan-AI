@@ -1,7 +1,7 @@
 /** Phase 10 exact-ten corpus inspection. GET-only; it never calls an RPC or worker. */
 import { readFileSync } from 'node:fs'
 import process from 'node:process'
-import { parseManifestText, validateManifest } from './phase10-manifest-intake.ts'
+import { parseManifestText, parseOfficialFacebookPostIdentity, validateManifest } from './phase10-manifest-intake.ts'
 import { loadEnvLocal } from './phase10-status.ts'
 
 export const AUGUST_23_POST_ID = '1475245514640502'
@@ -33,6 +33,9 @@ function production(row: Row): boolean {
   const provenance = row.source_metadata && typeof row.source_metadata === 'object' && !Array.isArray(row.source_metadata) ? (row.source_metadata as Row).provenance : undefined
   const validProvenance = provenance && typeof provenance === 'object' && !Array.isArray(provenance) && ['operator', 'reviewed_at', 'capture_note'].every((field) => typeof (provenance as Row)[field] === 'string' && Boolean(String((provenance as Row)[field]).trim()))
   return row.platform === 'facebook' && typeof row.post_id === 'string' && /^\d+$/.test(row.post_id) && ['manual', 'meta_graph_api', 'admin_export'].includes(String(row.collection_method)) && validProvenance === true && !/synthetic|fixture|acceptance|smoke|test/.test(text) && row.is_current === true && ['active', 'updated', 'postponed'].includes(String(row.status))
+}
+function hasOfficialPostIdentity(row: Row, expectedPostId: string): boolean {
+  return parseOfficialFacebookPostIdentity(row.post_url)?.postId === expectedPostId
 }
 function bounded(value: unknown): unknown {
   if (typeof value === 'string') return value.length > 500 ? `${value.slice(0, 500)}…` : value
@@ -86,11 +89,9 @@ export async function inspectManifest(manifest: unknown[], options: InspectorOpt
   for (const manifestRow of expected) {
     const identityMatches = productionSources.filter((row) => row.post_id === manifestRow.post_id)
     if (identityMatches.length !== 1) throw new Error(`source identity ${manifestRow.post_id} is ${identityMatches.length === 0 ? 'missing' : 'ambiguous'} or duplicated`)
-    const matches = identityMatches.filter((row) => row.post_url === manifestRow.post_url)
-    if (matches.length !== 1) throw new Error(`source identity ${manifestRow.post_id} is ${matches.length === 0 ? 'missing' : 'ambiguous'} or mismatched`)
-    const source = matches[0]
+    const source = identityMatches[0]
     required(source, ['id', 'platform', 'post_id', 'post_url', 'collection_method', 'source_metadata', 'raw_text', 'normalized_text'], 'sources')
-    if (typeof source.post_url !== 'string' || !new RegExp(`^https://www[.]facebook[.]com/Buglasan/posts/(?:[^/?#]+/)?${manifestRow.post_id}/?$`).test(source.post_url)) throw new Error(`source identity ${manifestRow.post_id} has invalid URL`)
+    if (!hasOfficialPostIdentity(manifestRow, manifestRow.post_id) || !hasOfficialPostIdentity(source, manifestRow.post_id)) throw new Error(`source identity ${manifestRow.post_id} has invalid URL`)
     const sourceId = String(source.id)
     const [extractions, indexings, events, links, chunks, runs] = await Promise.all([
       getRows(options.url, options.key, `source_extractions?source_id=eq.${enc(sourceId)}&extractor_version=eq.${EXTRACTOR_VERSION}&select=*&limit=${limit + 1}`, request),

@@ -36,6 +36,8 @@ describe('Phase 10 exact-ten corpus inspector', () => {
     expect(report.resolved_records).toBe(1)
     expect(report.evidence_check).toMatchObject({ post_id: AUGUST_23_POST_ID, matched: true, stored_source_or_chunk_text_only: true })
     expect(calls.every((call) => call.startsWith('GET:'))).toBe(true)
+    expect(calls.every((call) => call.includes('/rest/v1/'))).toBe(true)
+    expect(calls.some((call) => /functions|provider|worker|rpc|mutat|insert|update|delete|upsert/i.test(call))).toBe(false)
     expect(JSON.stringify(report)).not.toContain('secret')
   })
   it('skips empty UUID in queries and preserves corrected request shape', async () => {
@@ -64,6 +66,32 @@ describe('Phase 10 exact-ten corpus inspector', () => {
   })
   it('detects a same-post duplicate even when its URL differs', async () => {
     await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([source, { ...source, id: '00000000-0000-0000-0000-000000000002', post_url: 'https://www.facebook.com/Buglasan/posts/other' }], []) })).rejects.toThrow(/duplicated/)
+  })
+  it('matches by exact numeric post ID without requiring slug equality', async () => {
+    const differentSlug = { ...source, post_url: `https://www.facebook.com/Buglasan/posts/official-announcement/${AUGUST_23_POST_ID}` }
+    await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([differentSlug], []) })).resolves.toMatchObject({ resolved_records: 1 })
+  })
+  it('accepts encoded slug variation while retaining the terminal numeric identity', async () => {
+    const encodedSlug = { ...source, post_url: `https://www.facebook.com/Buglasan/posts/official%20announcement/${AUGUST_23_POST_ID}` }
+    await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([encodedSlug], []) })).resolves.toMatchObject({ resolved_records: 1 })
+  })
+  it.each([
+    ['wrong ID', `https://www.facebook.com/Buglasan/posts/official/${Number(AUGUST_23_POST_ID) + 1}`],
+    ['wrong page', `https://www.facebook.com/other-page/posts/${AUGUST_23_POST_ID}`],
+    ['malformed URL', 'not a URL'],
+    ['query string', `https://www.facebook.com/Buglasan/posts/${AUGUST_23_POST_ID}?ref=share`],
+  ])('fails closed for %s persisted URL', async (_name, postUrl) => {
+    await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([{ ...source, post_url: postUrl }], []) })).rejects.toThrow(/invalid URL/)
+  })
+  it('requires manifest provenance before any persisted reads', async () => {
+    const calls: string[] = []
+    await expect(inspectManifest([{ ...manifest[0], provenance: undefined }], { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([source], calls) })).rejects.toThrow(/manifest validation failed.*provenance/)
+    expect(calls).toEqual([])
+  })
+  it('requires persisted source provenance before resolving production identity', async () => {
+    const calls: string[] = []
+    await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([{ ...source, source_metadata: {} }], calls) })).rejects.toThrow()
+    expect(calls).toHaveLength(1)
   })
   it('rejects ineligible provenance and collection method', async () => {
     await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([{ ...source, collection_method: 'scrape', source_metadata: {} }], []) })).rejects.toThrow()

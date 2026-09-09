@@ -27,20 +27,22 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function validateOfficialUrl(value: unknown, postId: unknown, issues: string[]): void {
-  if (typeof value !== 'string') {
-    issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL')
-    return
-  }
+/** Parses the stable identity at the end of an official Buglasan Facebook post URL. */
+export function parseOfficialFacebookPostIdentity(value: unknown): { postId: string } | null {
+  if (typeof value !== 'string' || value !== value.trim()) return null
   try {
-    const url = new URL(value.trim())
+    const url = new URL(value)
     const finalId = url.pathname.match(/\/(\d+)\/?$/)?.[1]
-    if (url.protocol !== 'https:' || url.hostname !== 'www.facebook.com' || url.port || url.username || url.password || url.search || url.hash || !OFFICIAL_POST_PATH.test(url.pathname) || finalId !== postId) {
-      issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL whose final numeric ID equals post_id')
-    }
+    if (url.protocol !== 'https:' || url.hostname !== 'www.facebook.com' || url.port || url.username || url.password || url.search || url.hash || !OFFICIAL_POST_PATH.test(url.pathname) || !finalId) return null
+    return { postId: finalId }
   } catch {
-    issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL')
+    return null
   }
+}
+
+function validateOfficialUrl(value: unknown, postId: unknown, issues: string[]): void {
+  const identity = parseOfficialFacebookPostIdentity(value)
+  if (!identity || identity.postId !== postId) issues.push('post_url must be an exact trusted HTTPS www.facebook.com/Buglasan post URL whose final numeric ID equals post_id')
 }
 
 /** Converts one operator record to the existing source ingestion contract without writing data. */
