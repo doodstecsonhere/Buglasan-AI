@@ -35,6 +35,15 @@ export type RepairAdapter = {
   extractSource: (input: { sourceId: string; fingerprint: string; provenance: Row }) => Promise<Row>
   indexSource: (input: { sourceId: string; fingerprint: string; indexerVersion: string; embeddingModel: string; embeddingDimensions: number }) => Promise<Row>
 }
+export type Phase10RepairTransport = (url: string, init: RequestInit) => Promise<Response>
+export type Phase10RepairHttpConfig = {
+  supabaseUrl: string
+  serviceKey: string
+  operatorToken: string
+  extractionToken: string
+  indexingToken: string
+  transport?: Phase10RepairTransport
+}
 export type RepairOptions = { adapter?: RepairAdapter; execute?: boolean; manifestPath?: string; readManifest?: (path: string) => string }
 
 const REDACT = /key|token|secret|password|credential|authorization|cookie/i
@@ -61,6 +70,77 @@ function assertHistorical(before: RepairState, after: RepairState): void {
   if (!same(before.historical, after.historical)) throw new Error('failed_closed: historical event/link/review/reconciliation state changed')
 }
 
+function requiredHttpConfig(config: Phase10RepairHttpConfig): void {
+  if (!config.supabaseUrl || !/^https:\/\//i.test(config.supabaseUrl) || !config.serviceKey || !config.operatorToken || !config.extractionToken || !config.indexingToken) {
+    throw new Error('failed_closed: incomplete provenance repair HTTP configuration')
+  }
+}
+
+async function repairJsonRequest(transport: Phase10RepairTransport, url: string, init: RequestInit): Promise<unknown> {
+  let response: Response
+  try { response = await transport(url, init) } catch { throw new Error('outcome_indeterminate: transport failure') }
+  const text = await response.text()
+  let body: unknown = null
+  try { body = text ? JSON.parse(text) : null } catch { body = null }
+  if (!response.ok) throw new Error(`stage_failed:${response.status}:${typeof body === 'object' && body ? JSON.stringify(redactProvenanceRepair(body)) : 'unparseable response'}`)
+  return body
+}
+
+/** Production adapter for the existing source, extraction, and indexing contracts.
+ * It intentionally has no terminal-retry, reconciliation, SQL, or direct-table write path.
+ */
+export function createProvenanceRepairHttpAdapter(config: Phase10RepairHttpConfig): RepairAdapter {
+  requiredHttpConfig(config)
+  const transport = config.transport ?? fetch
+  const base = config.supabaseUrl.replace(/\/$/, '')
+  const auth = { apikey: config.serviceKey, authorization: `Bearer ${config.serviceKey}` }
+  const get = (path: string) => repairJsonRequest(transport, `${base}/rest/v1/${path}`, { method: 'GET', headers: auth })
+  const rpc = (name: string, body: unknown) => repairJsonRequest(transport, `${base}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const functionRequest = (name: 'extract-source' | 'index-source', tokenName: 'x-extraction-token' | 'x-index-source-token', token: string, body: unknown) => repairJsonRequest(transport, `${base}/functions/v1/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', [tokenName]: token }, body: JSON.stringify(body) })
+  const rows = (value: unknown, label: string): Row[] => { if (!Array.isArray(value)) throw new Error(`failed_closed: ${label} inspection response is not an array`); return value as Row[] }
+  const one = (value: unknown, label: string): Row | null => { const result = rows(value, label); if (result.length > 1) throw new Error(`failed_closed: ambiguous ${label} inspection`); return result[0] ?? null }
+
+  return {
+    async inspect(sourceId, postId) {
+      const source = one(await get(`sources?id=eq.${encodeURIComponent(sourceId)}&platform=eq.facebook&post_id=eq.${encodeURIComponent(postId)}&select=*`), 'source')
+      const fingerprint = source?.content_fingerprint
+      const extraction = fingerprint ? one(await get(`source_extractions?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&extractor_version=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.extractionVersion)}&select=*&order=created_at.desc&limit=2`), 'extraction') : null
+      const indexing = fingerprint ? one(await get(`source_indexings?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&indexer_version=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.indexerVersion)}&embedding_model=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.embeddingModel)}&embedding_dimensions=eq.${PHASE10_PROVENANCE_REPAIR.embeddingDimensions}&select=*&order=created_at.desc&limit=2`), 'indexing') : null
+      const events = source ? rows(await get(`events?extracted_source_id=eq.${encodeURIComponent(sourceId)}&select=*&order=id&limit=100`), 'events') : []
+      const links = source ? rows(await get(`event_sources?source_id=eq.${encodeURIComponent(sourceId)}&select=*&order=event_id&limit=100`), 'links') : []
+      const runs = source && fingerprint ? rows(await get(`event_reconciliation_runs?candidate_source_id=eq.${encodeURIComponent(sourceId)}&candidate_source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&select=*&order=created_at.desc&limit=100`), 'reconciliation') : []
+      const eventIds = events.map(event => event.id).filter((id): id is string => typeof id === 'string')
+      // Reviews are linked to candidate events rather than sources; inspect the
+      // read-only review table and retain only rows belonging to this source.
+      const reviewRows = source ? rows(await get('event_reconciliation_reviews?select=*&order=created_at.desc&limit=1000'), 'reviews') : []
+      const reviews = reviewRows.filter(review => typeof review.candidate_event_id === 'string' && eventIds.includes(review.candidate_event_id))
+      return { source, extraction, indexing, historical: { events, links, reviews, reconciliation: runs } }
+    },
+    async ingestSource(payload) {
+      const result = rows(await rpc('ingest_source', { p_payload: payload }), 'ingest_source')
+      if (result.length !== 1) throw new Error('failed_closed: canonical ingest_source response is not one row')
+      return result[0]
+    },
+    async extractSource({ sourceId, provenance }) {
+      // Deliberately normal extraction: phase-10 terminal recovery is not a repair seam.
+      const result = await functionRequest('extract-source', 'x-extraction-token', config.extractionToken, { source_id: sourceId })
+      return { ...(result as Row), provenance }
+    },
+    async indexSource({ sourceId }) {
+      return (await functionRequest('index-source', 'x-index-source-token', config.indexingToken, { source_id: sourceId })) as Row
+    },
+  }
+}
+
+export function createProvenanceRepairAdapterFromEnv(): RepairAdapter {
+  loadEnvLocal()
+  return createProvenanceRepairHttpAdapter({
+    supabaseUrl: process.env.SUPABASE_URL ?? '', serviceKey: process.env.SUPABASE_SECRET_KEY ?? '',
+    operatorToken: process.env.PHASE10_OPERATOR_TOKEN ?? '', extractionToken: process.env.EXTRACT_SOURCE_TOKEN ?? '',
+    indexingToken: process.env.INDEX_SOURCE_TOKEN ?? '',
+  })
+}
+
 export function loadTrustedProvenancePayload(path = PHASE10_PROVENANCE_REPAIR.manifestPath, readManifest = (file: string) => readFileSync(file, 'utf8')): SourceIngestionPayload {
   if (path !== PHASE10_PROVENANCE_REPAIR.manifestPath) throw new Error('trusted manifest path is required')
   const report = validateManifest(parseManifestText(readManifest(path), 'json'))
@@ -80,7 +160,7 @@ export function parseProvenanceRepairArguments(argv: string[]): { postId: string
 }
 
 export async function runProvenanceRepair(options: RepairOptions = {}): Promise<Record<string, unknown>> {
-  const payload = loadTrustedProvenancePayload(options.manifestPath, options.readManifest)
+  const payload = loadTrustedProvenancePayload(options.manifestPath as typeof PHASE10_PROVENANCE_REPAIR.manifestPath | undefined, options.readManifest)
   if (payload.post_id !== PHASE10_PROVENANCE_REPAIR.postId || payload.platform !== 'facebook') throw new Error('failed_closed: manifest identity mismatch')
   if (!options.execute) return { mode: 'dry-run', non_mutating: true, writes: 0, target: PHASE10_PROVENANCE_REPAIR }
   const adapter = options.adapter
@@ -124,11 +204,9 @@ export async function runProvenanceRepair(options: RepairOptions = {}): Promise<
 }
 
 if (import.meta.main) {
-  loadEnvLocal()
   try {
     const args = parseProvenanceRepairArguments(process.argv.slice(2))
-    // A real adapter is deliberately not silently fabricated. Deployment must wire the audited normal-path adapter.
-    if (!args.execute) console.log(JSON.stringify(await runProvenanceRepair(), null, 2))
-    else throw new Error('failed_closed: normal extraction/indexing adapter is not configured')
+    const adapter = args.execute ? createProvenanceRepairAdapterFromEnv() : undefined
+    console.log(JSON.stringify(await runProvenanceRepair({ adapter, execute: args.execute }), null, 2))
   } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1 }
 }

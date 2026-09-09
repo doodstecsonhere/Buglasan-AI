@@ -9,6 +9,8 @@ import {
   parseProvenanceRepairArguments,
   redactProvenanceRepair,
   runProvenanceRepair,
+  createProvenanceRepairHttpAdapter,
+  createProvenanceRepairAdapterFromEnv,
   type RepairAdapter,
   type RepairState,
 } from './phase10-provenance-repair.ts'
@@ -110,6 +112,54 @@ describe('guarded Phase 10 provenance repair', () => {
       if (previous === undefined) delete process.env.PHASE10_OPERATOR_TOKEN; else process.env.PHASE10_OPERATOR_TOKEN = previous
       delete process.env.SUPABASE_URL
       rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('uses read-only canonical inspection and normal-path request contracts', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const fingerprint = 'a'.repeat(64)
+    const transport = async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/sources?')) return new Response(JSON.stringify([{ id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, platform: 'facebook', content_fingerprint: fingerprint }]))
+      return new Response('[]')
+    }
+    const adapter = createProvenanceRepairHttpAdapter({ supabaseUrl: 'https://example.supabase.co', serviceKey: 'service', operatorToken: 'operator', extractionToken: 'extract', indexingToken: 'index', transport })
+    await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
+    expect(calls.every(({ init }) => init.method === 'GET')).toBe(true)
+    expect(calls.every(({ init }) => (init.headers as Record<string, string>).apikey === 'service' && (init.headers as Record<string, string>).authorization === 'Bearer service')).toBe(true)
+    expect(calls.some(({ url }) => url.includes('/event_reconciliation_runs?'))).toBe(true)
+    expect(calls.some(({ url }) => url.includes('/event_reconciliation_reviews?'))).toBe(true)
+  })
+
+  it('authenticates canonical ingest and worker endpoints without terminal recovery headers or paths', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const transport = async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/rpc/ingest_source')) return new Response(JSON.stringify([{ source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, content_fingerprint: 'a'.repeat(64) }]))
+      return new Response(JSON.stringify({ status: 'processing' }))
+    }
+    const adapter = createProvenanceRepairHttpAdapter({ supabaseUrl: 'https://example.supabase.co', serviceKey: 'service', operatorToken: 'operator', extractionToken: 'extract', indexingToken: 'index', transport })
+    const payload = loadTrustedProvenancePayload(PHASE10_PROVENANCE_REPAIR.manifestPath, readManifest)
+    await adapter.ingestSource(payload)
+    await adapter.extractSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: 'a'.repeat(64), provenance: payload.source_metadata.provenance as Record<string, unknown> })
+    await adapter.indexSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: 'a'.repeat(64), indexerVersion: PHASE10_PROVENANCE_REPAIR.indexerVersion, embeddingModel: PHASE10_PROVENANCE_REPAIR.embeddingModel, embeddingDimensions: 768 })
+    expect(calls.map(({ url }) => new URL(url).pathname)).toEqual(['/rest/v1/rpc/ingest_source', '/functions/v1/extract-source', '/functions/v1/index-source'])
+    expect(calls[0].init.headers).toMatchObject({ apikey: 'service', authorization: 'Bearer service' })
+    expect(calls[1].init.headers).toMatchObject({ 'x-extraction-token': 'extract' })
+    expect(calls[2].init.headers).toMatchObject({ 'x-index-source-token': 'index' })
+    expect(calls.some(({ url }) => url.includes('terminal'))).toBe(false)
+    expect(calls.some(({ init }) => Object.keys(init.headers as object).some(key => key.includes('operator')))).toBe(false)
+  })
+
+  it('constructs the CLI execute adapter from the shared env loader', () => {
+    const previous = Object.fromEntries(['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'PHASE10_OPERATOR_TOKEN', 'EXTRACT_SOURCE_TOKEN', 'INDEX_SOURCE_TOKEN'].map(name => [name, process.env[name]]))
+    try {
+      Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SECRET_KEY: 'service', PHASE10_OPERATOR_TOKEN: 'operator', EXTRACT_SOURCE_TOKEN: 'extract', INDEX_SOURCE_TOKEN: 'index' })
+      const adapter = createProvenanceRepairAdapterFromEnv()
+      expect(adapter).toBeDefined()
+      expect(adapter.inspect).toBeTypeOf('function')
+    } finally {
+      for (const [name, value] of Object.entries(previous)) if (value === undefined) delete process.env[name]; else process.env[name] = value
     }
   })
 })
