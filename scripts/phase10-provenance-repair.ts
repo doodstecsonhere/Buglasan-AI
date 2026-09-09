@@ -14,6 +14,7 @@ export const PHASE10_PROVENANCE_REPAIR = Object.freeze({
   sourceUuid: '254d56af-7bf4-4913-8a9b-d5ab34367b33',
   postId: '1472636598234727',
   beforeFingerprint: '02f61ce417f0ea742c75167b155fa682cf8bfa5f4bd21cb16b8f4774b0f63753',
+  afterFingerprint: 'b027b08f103cd1cd85aa59a54abd5fb0249f3461805b9d72e02bb6d827510df',
   manifestPath: 'operator-manifests/buglasan-2026-real-corpus-01.json',
   extractionVersion: 'phase6-v1',
   indexerVersion: 'semantic-index-v1',
@@ -27,12 +28,13 @@ export type RepairState = {
   source: Row | null
   extraction: Row | null
   indexing: Row | null
+  sourceChunks: { before: Row[]; after: Row[] }
   historical: { events: Row[]; links: Row[]; reviews: Row[]; reconciliation: Row[] }
 }
 export type RepairAdapter = {
   inspect: (sourceId: string, postId: string) => Promise<RepairState>
   ingestSource: (payload: SourceIngestionPayload) => Promise<Row>
-  extractSource: (input: { sourceId: string; fingerprint: string; provenance: Row }) => Promise<Row>
+  extractSource: (input: { sourceId: string; fingerprint: string; provenance: Row; sourceBefore?: Row; extractionBefore?: Row | null }) => Promise<Row>
   indexSource: (input: { sourceId: string; fingerprint: string; indexerVersion: string; embeddingModel: string; embeddingDimensions: number }) => Promise<Row>
 }
 export type Phase10RepairTransport = (url: string, init: RequestInit) => Promise<Response>
@@ -42,6 +44,9 @@ export type Phase10RepairHttpConfig = {
   operatorToken: string
   extractionToken: string
   indexingToken: string
+  transport?: Phase10RepairTransport
+}
+export type Phase10RepairInspectionHttpConfig = Pick<Phase10RepairHttpConfig, 'supabaseUrl' | 'serviceKey'> & {
   transport?: Phase10RepairTransport
 }
 export type RepairOptions = { adapter?: RepairAdapter; execute?: boolean; manifestPath?: string; readManifest?: (path: string) => string }
@@ -70,9 +75,78 @@ function assertHistorical(before: RepairState, after: RepairState): void {
   if (!same(before.historical, after.historical)) throw new Error('failed_closed: historical event/link/review/reconciliation state changed')
 }
 
+function assertIngestAcknowledgement(value: unknown): Row {
+  const row = Array.isArray(value) ? value.length === 1 ? value[0] : null : value
+  if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('failed_closed: canonical ingest_source response shape is invalid')
+  const result = row as Row
+  if (result.source_id !== PHASE10_PROVENANCE_REPAIR.sourceUuid || result.post_id !== PHASE10_PROVENANCE_REPAIR.postId) throw new Error('failed_closed: canonical ingest_source did not preserve identity')
+  if (!['inserted', 'updated', 'unchanged'].includes(String(result.operation)) || typeof result.changed !== 'boolean') throw new Error('failed_closed: canonical ingest_source acknowledgement is invalid')
+  return result
+}
+
+function assertIndexAcknowledgement(value: unknown): Row {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('failed_closed: index-source response shape is invalid')
+  const result = value as Row
+  if (result.source_id !== PHASE10_PROVENANCE_REPAIR.sourceUuid || typeof result.status !== 'string' || typeof result.cached !== 'boolean' || typeof result.persisted_chunks !== 'number') throw new Error('failed_closed: index-source response contract mismatch')
+  return result
+}
+
+function isSuccessfulExtraction(row: Row | null, fingerprint: string): boolean {
+  return row?.status === 'extracted' && row.source_fingerprint === fingerprint && row.extractor_version === PHASE10_PROVENANCE_REPAIR.extractionVersion
+}
+
+function isSuccessfulIndexing(row: Row | null, fingerprint: string): boolean {
+  return row?.status === 'indexed' && row.source_fingerprint === fingerprint
+    && row.indexer_version === PHASE10_PROVENANCE_REPAIR.indexerVersion
+    && row.embedding_model === PHASE10_PROVENANCE_REPAIR.embeddingModel
+    && Number(row.embedding_dimensions) === PHASE10_PROVENANCE_REPAIR.embeddingDimensions
+}
+
+function isExactAfterChunks(state: RepairState): boolean {
+  const current = state.sourceChunks?.after
+  const historical = state.sourceChunks?.before
+  return Array.isArray(current) && current.length > 0
+    && current.every(chunk => chunk.source_fingerprint === PHASE10_PROVENANCE_REPAIR.afterFingerprint
+      && chunk.indexer_version === PHASE10_PROVENANCE_REPAIR.indexerVersion
+      && chunk.embedding_model === PHASE10_PROVENANCE_REPAIR.embeddingModel
+      && Number(chunk.embedding_dimensions) === PHASE10_PROVENANCE_REPAIR.embeddingDimensions
+      && chunk.is_current === true)
+    && Array.isArray(historical) && historical.length > 0
+    && historical.every(chunk => chunk.source_fingerprint === PHASE10_PROVENANCE_REPAIR.beforeFingerprint && chunk.is_current === false)
+}
+
+function isComplete(state: RepairState, provenance: Row): boolean {
+  return state.source?.id === PHASE10_PROVENANCE_REPAIR.sourceUuid
+    && state.source.post_id === PHASE10_PROVENANCE_REPAIR.postId
+    && state.source.content_fingerprint === PHASE10_PROVENANCE_REPAIR.afterFingerprint
+    && state.source.is_current === true
+    && same(state.source.source_metadata && (state.source.source_metadata as Row).provenance, provenance)
+    && isSuccessfulExtraction(state.extraction, PHASE10_PROVENANCE_REPAIR.afterFingerprint)
+    && isSuccessfulIndexing(state.indexing, PHASE10_PROVENANCE_REPAIR.afterFingerprint)
+    && isExactAfterChunks(state)
+    && state.historical && Array.isArray(state.historical.events) && Array.isArray(state.historical.links)
+    && Array.isArray(state.historical.reviews) && Array.isArray(state.historical.reconciliation)
+}
+
+function classifyDryRun(state: RepairState, provenance: Row): string {
+  if (!state.source || !Array.isArray(state.historical?.events) || !Array.isArray(state.historical?.links)
+    || !Array.isArray(state.historical?.reviews) || !Array.isArray(state.historical?.reconciliation)) return 'unknown'
+  if (state.source.id !== PHASE10_PROVENANCE_REPAIR.sourceUuid || state.source.post_id !== PHASE10_PROVENANCE_REPAIR.postId) return 'drift'
+  if (isComplete(state, provenance)) return 'exact already-complete'
+  if (state.source.content_fingerprint === PHASE10_PROVENANCE_REPAIR.beforeFingerprint) return 'exact before'
+  if (state.source.content_fingerprint === PHASE10_PROVENANCE_REPAIR.afterFingerprint) return 'partial'
+  return 'drift'
+}
+
 function requiredHttpConfig(config: Phase10RepairHttpConfig): void {
   if (!config.supabaseUrl || !/^https:\/\//i.test(config.supabaseUrl) || !config.serviceKey || !config.operatorToken || !config.extractionToken || !config.indexingToken) {
     throw new Error('failed_closed: incomplete provenance repair HTTP configuration')
+  }
+}
+
+function requiredInspectionHttpConfig(config: Phase10RepairInspectionHttpConfig): void {
+  if (!config.supabaseUrl || !/^https:\/\//i.test(config.supabaseUrl) || !config.serviceKey) {
+    throw new Error('failed_closed: incomplete provenance repair inspection HTTP configuration (SUPABASE_URL and SUPABASE_SECRET_KEY are required)')
   }
 }
 
@@ -91,44 +165,70 @@ async function repairJsonRequest(transport: Phase10RepairTransport, url: string,
  */
 export function createProvenanceRepairHttpAdapter(config: Phase10RepairHttpConfig): RepairAdapter {
   requiredHttpConfig(config)
+  const inspection = createProvenanceRepairInspectionHttpAdapter(config)
   const transport = config.transport ?? fetch
   const base = config.supabaseUrl.replace(/\/$/, '')
   const auth = { apikey: config.serviceKey, authorization: `Bearer ${config.serviceKey}` }
   const get = (path: string) => repairJsonRequest(transport, `${base}/rest/v1/${path}`, { method: 'GET', headers: auth })
   const rpc = (name: string, body: unknown) => repairJsonRequest(transport, `${base}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const functionRequest = (name: 'extract-source' | 'index-source', tokenName: 'x-extraction-token' | 'x-index-source-token', token: string, body: unknown) => repairJsonRequest(transport, `${base}/functions/v1/${name}`, { method: 'POST', headers: { 'content-type': 'application/json', [tokenName]: token }, body: JSON.stringify(body) })
+  return {
+    inspect: inspection.inspect,
+    async ingestSource(payload) {
+      return assertIngestAcknowledgement(await rpc('ingest_source', { p_payload: payload }))
+    },
+    async extractSource({ sourceId, fingerprint, provenance, sourceBefore, extractionBefore }) {
+      // The deployed contract has an explicit, operator-gated phase-10 request.
+      // Never fall back to the ordinary extraction request for this repair.
+      const result = await repairJsonRequest(transport, `${base}/functions/v1/extract-source`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-extraction-token': config.extractionToken, 'x-phase10-operator-token': config.operatorToken }, body: JSON.stringify({
+        source_id: sourceId, source_fingerprint: fingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion,
+        source_before: sourceBefore, extraction_before: extractionBefore, operator_metadata: provenance,
+      }) })
+      if (!result || typeof result !== 'object' || Array.isArray(result) || !['extracted', 'no_event'].includes(String((result as Row).status))) throw new Error('failed_closed: extraction acknowledgement/status is not successful')
+      return { ...(result as Row), provenance }
+    },
+    async indexSource({ sourceId }) {
+      const result = assertIndexAcknowledgement(await functionRequest('index-source', 'x-index-source-token', config.indexingToken, { source_id: sourceId }))
+      if (result.status !== 'indexed') throw new Error('failed_closed: index-source acknowledgement/status is not successful')
+      return result
+    },
+  }
+}
+
+/** Read-only production adapter used by dry-run. Its mutation methods are
+ * deliberately fail-closed, so a dry-run adapter cannot write even if a
+ * caller accidentally reaches the execute-only surface. */
+export function createProvenanceRepairInspectionHttpAdapter(config: Phase10RepairInspectionHttpConfig): RepairAdapter {
+  requiredInspectionHttpConfig(config)
+  const transport = config.transport ?? fetch
+  const base = config.supabaseUrl.replace(/\/$/, '')
+  const auth = { apikey: config.serviceKey, authorization: `Bearer ${config.serviceKey}` }
+  const get = (path: string) => repairJsonRequest(transport, `${base}/rest/v1/${path}`, { method: 'GET', headers: auth })
   const rows = (value: unknown, label: string): Row[] => { if (!Array.isArray(value)) throw new Error(`failed_closed: ${label} inspection response is not an array`); return value as Row[] }
   const one = (value: unknown, label: string): Row | null => { const result = rows(value, label); if (result.length > 1) throw new Error(`failed_closed: ambiguous ${label} inspection`); return result[0] ?? null }
-
+  const mutation = async (): Promise<never> => { throw new Error('failed_closed: mutation method is unavailable on the dry-run inspection adapter') }
   return {
     async inspect(sourceId, postId) {
       const source = one(await get(`sources?id=eq.${encodeURIComponent(sourceId)}&platform=eq.facebook&post_id=eq.${encodeURIComponent(postId)}&select=*`), 'source')
       const fingerprint = source?.content_fingerprint
       const extraction = fingerprint ? one(await get(`source_extractions?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&extractor_version=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.extractionVersion)}&select=*&order=created_at.desc&limit=2`), 'extraction') : null
       const indexing = fingerprint ? one(await get(`source_indexings?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&indexer_version=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.indexerVersion)}&embedding_model=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.embeddingModel)}&embedding_dimensions=eq.${PHASE10_PROVENANCE_REPAIR.embeddingDimensions}&select=*&order=created_at.desc&limit=2`), 'indexing') : null
+      const chunkSelect = 'source_fingerprint,indexer_version,embedding_model,embedding_dimensions,chunk_index,is_current'
+      const chunks = {
+        before: rows(await get(`source_chunks?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.beforeFingerprint)}&select=${chunkSelect}&order=chunk_index&limit=1000`), 'source_chunks before'),
+        after: rows(await get(`source_chunks?source_id=eq.${encodeURIComponent(sourceId)}&source_fingerprint=eq.${encodeURIComponent(PHASE10_PROVENANCE_REPAIR.afterFingerprint)}&select=${chunkSelect}&order=chunk_index&limit=1000`), 'source_chunks after'),
+      }
       const events = source ? rows(await get(`events?extracted_source_id=eq.${encodeURIComponent(sourceId)}&select=*&order=id&limit=100`), 'events') : []
       const links = source ? rows(await get(`event_sources?source_id=eq.${encodeURIComponent(sourceId)}&select=*&order=event_id&limit=100`), 'links') : []
       const runs = source && fingerprint ? rows(await get(`event_reconciliation_runs?candidate_source_id=eq.${encodeURIComponent(sourceId)}&candidate_source_fingerprint=eq.${encodeURIComponent(String(fingerprint))}&select=*&order=created_at.desc&limit=100`), 'reconciliation') : []
       const eventIds = events.map(event => event.id).filter((id): id is string => typeof id === 'string')
-      // Reviews are linked to candidate events rather than sources; inspect the
-      // read-only review table and retain only rows belonging to this source.
       const reviewRows = source ? rows(await get('event_reconciliation_reviews?select=*&order=created_at.desc&limit=1000'), 'reviews') : []
       const reviews = reviewRows.filter(review => typeof review.candidate_event_id === 'string' && eventIds.includes(review.candidate_event_id))
-      return { source, extraction, indexing, historical: { events, links, reviews, reconciliation: runs } }
+      return { source, extraction, indexing, sourceChunks: chunks, historical: { events, links, reviews, reconciliation: runs } }
     },
-    async ingestSource(payload) {
-      const result = rows(await rpc('ingest_source', { p_payload: payload }), 'ingest_source')
-      if (result.length !== 1) throw new Error('failed_closed: canonical ingest_source response is not one row')
-      return result[0]
-    },
-    async extractSource({ sourceId, provenance }) {
-      // Deliberately normal extraction: phase-10 terminal recovery is not a repair seam.
-      const result = await functionRequest('extract-source', 'x-extraction-token', config.extractionToken, { source_id: sourceId })
-      return { ...(result as Row), provenance }
-    },
-    async indexSource({ sourceId }) {
-      return (await functionRequest('index-source', 'x-index-source-token', config.indexingToken, { source_id: sourceId })) as Row
-    },
+    ingestSource: mutation,
+    extractSource: mutation,
+    indexSource: mutation,
   }
 }
 
@@ -138,6 +238,13 @@ export function createProvenanceRepairAdapterFromEnv(): RepairAdapter {
     supabaseUrl: process.env.SUPABASE_URL ?? '', serviceKey: process.env.SUPABASE_SECRET_KEY ?? '',
     operatorToken: process.env.PHASE10_OPERATOR_TOKEN ?? '', extractionToken: process.env.EXTRACT_SOURCE_TOKEN ?? '',
     indexingToken: process.env.INDEX_SOURCE_TOKEN ?? '',
+  })
+}
+
+export function createProvenanceRepairInspectionAdapterFromEnv(): RepairAdapter {
+  loadEnvLocal()
+  return createProvenanceRepairInspectionHttpAdapter({
+    supabaseUrl: process.env.SUPABASE_URL ?? '', serviceKey: process.env.SUPABASE_SECRET_KEY ?? '',
   })
 }
 
@@ -162,51 +269,56 @@ export function parseProvenanceRepairArguments(argv: string[]): { postId: string
 export async function runProvenanceRepair(options: RepairOptions = {}): Promise<Record<string, unknown>> {
   const payload = loadTrustedProvenancePayload(options.manifestPath as typeof PHASE10_PROVENANCE_REPAIR.manifestPath | undefined, options.readManifest)
   if (payload.post_id !== PHASE10_PROVENANCE_REPAIR.postId || payload.platform !== 'facebook') throw new Error('failed_closed: manifest identity mismatch')
-  if (!options.execute) return { mode: 'dry-run', non_mutating: true, writes: 0, target: PHASE10_PROVENANCE_REPAIR }
   const adapter = options.adapter
-  if (!adapter) throw new Error('failed_closed: --execute requires a proven normal-path adapter')
-  const before = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
-  assertTargetState(before)
+  if (!adapter) throw new Error(`failed_closed: ${options.execute ? '--execute' : 'dry-run'} requires a read-only inspection adapter`)
   const provenance = payload.source_metadata.provenance as Row
+  if (!options.execute) {
+    const inspected = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
+    return redactProvenanceRepair({ mode: 'dry-run', non_mutating: true, writes: 0, classification: classifyDryRun(inspected, provenance), state: inspected, target: PHASE10_PROVENANCE_REPAIR }) as Record<string, unknown>
+  }
+  const before = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
+  if (isComplete(before, provenance)) return redactProvenanceRepair({ mode: 'execute', outcome: 'completed', writes: 0, fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, finalState: before }) as Record<string, unknown>
+  assertTargetState(before)
   const currentFingerprint = String(before.source?.content_fingerprint)
   if (currentFingerprint !== PHASE10_PROVENANCE_REPAIR.beforeFingerprint) throw new Error('failed_closed: exact BEFORE fingerprint mismatch')
   const afterFingerprint = before.source?.repair_fingerprint
   if (typeof afterFingerprint === 'string' && SHA256.test(afterFingerprint) && currentFingerprint === afterFingerprint) throw new Error('failed_closed: fingerprint transition is not deterministic')
   await assertBefore(adapter, before, 'canonical ingest_source')
   const ingested = await adapter.ingestSource(payload)
-  const next = String(ingested.content_fingerprint ?? '')
-  if (!SHA256.test(next) || next === PHASE10_PROVENANCE_REPAIR.beforeFingerprint) throw new Error('failed_closed: canonical ingestion fingerprint did not transition')
-  if (ingested.source_id !== PHASE10_PROVENANCE_REPAIR.sourceUuid || ingested.post_id !== PHASE10_PROVENANCE_REPAIR.postId) throw new Error('failed_closed: canonical ingest_source did not preserve identity')
+  if (ingested.operation !== 'updated' || ingested.changed !== true) throw new Error('failed_closed: canonical ingestion did not acknowledge an update')
   const fingerprinted = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
-  if (fingerprinted.source?.content_fingerprint !== next) throw new Error('failed_closed: fingerprint round-trip failed')
+  const next = String(fingerprinted.source?.content_fingerprint ?? '')
+  if (!SHA256.test(next) || next === PHASE10_PROVENANCE_REPAIR.beforeFingerprint) throw new Error('failed_closed: canonical ingestion fingerprint did not transition')
   assertHistorical(before, fingerprinted)
 
   let extraction: Row | null = null
-  const extractionDone = ['extracted', 'no_event', 'needs_review', 'permanent_error'].includes(String(fingerprinted.extraction?.status ?? ''))
+  const extractionDone = isSuccessfulExtraction(fingerprinted.extraction, next)
   if (!extractionDone) {
-    await assertBefore(adapter, fingerprinted, 'normal extraction')
-    extraction = await adapter.extractSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: next, provenance: clone(provenance) })
+    await assertBefore(adapter, fingerprinted, 'authorized extraction')
+    extraction = await adapter.extractSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: next, provenance: clone(provenance), sourceBefore: clone(fingerprinted.source!), extractionBefore: clone(fingerprinted.extraction) })
     if (!same(extraction.provenance, provenance)) throw new Error('failed_closed: provenance round-trip failed')
+    if (!['extracted', 'no_event'].includes(String(extraction.status))) throw new Error('failed_closed: extraction acknowledgement/status is not successful')
   }
   const postExtraction = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
   assertHistorical(before, postExtraction)
-  const extractionReady = ['extracted', 'no_event'].includes(String(postExtraction.extraction?.status ?? extraction?.status ?? ''))
+  const extractionReady = isSuccessfulExtraction(postExtraction.extraction, next) || extraction?.status === 'extracted' || extraction?.status === 'no_event'
   let indexing: Row | null = null
-  const indexingDone = ['indexed', 'no_text', 'needs_review', 'permanent_error'].includes(String(postExtraction.indexing?.status ?? ''))
+  const indexingDone = isSuccessfulIndexing(postExtraction.indexing, next)
   if (extractionReady && !indexingDone) {
     await assertBefore(adapter, postExtraction, 'semantic indexing')
     indexing = await adapter.indexSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: next, indexerVersion: PHASE10_PROVENANCE_REPAIR.indexerVersion, embeddingModel: PHASE10_PROVENANCE_REPAIR.embeddingModel, embeddingDimensions: PHASE10_PROVENANCE_REPAIR.embeddingDimensions })
-    if (indexing.indexer_version !== PHASE10_PROVENANCE_REPAIR.indexerVersion || indexing.embedding_model !== PHASE10_PROVENANCE_REPAIR.embeddingModel || indexing.embedding_dimensions !== PHASE10_PROVENANCE_REPAIR.embeddingDimensions) throw new Error('failed_closed: semantic index contract mismatch')
+    if (!isSuccessfulIndexing(indexing, next)) throw new Error('failed_closed: indexing acknowledgement/status is not successful')
   }
   const finalState = await adapter.inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
   assertHistorical(before, finalState)
+  if (finalState.source?.content_fingerprint !== next || !isSuccessfulExtraction(finalState.extraction, next) || !isSuccessfulIndexing(finalState.indexing, next)) throw new Error('failed_closed: extraction/indexing status round-trip was not successful')
   return redactProvenanceRepair({ mode: 'execute', outcome: 'completed', writes: 1 + (extraction ? 1 : 0) + (indexing ? 1 : 0), fingerprint: next, extraction, indexing, finalState }) as Record<string, unknown>
 }
 
 if (import.meta.main) {
   try {
     const args = parseProvenanceRepairArguments(process.argv.slice(2))
-    const adapter = args.execute ? createProvenanceRepairAdapterFromEnv() : undefined
+    const adapter = args.execute ? createProvenanceRepairAdapterFromEnv() : createProvenanceRepairInspectionAdapterFromEnv()
     console.log(JSON.stringify(await runProvenanceRepair({ adapter, execute: args.execute }), null, 2))
   } catch (error) { console.error(error instanceof Error ? error.message : error); process.exitCode = 1 }
 }

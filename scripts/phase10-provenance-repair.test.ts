@@ -10,7 +10,9 @@ import {
   redactProvenanceRepair,
   runProvenanceRepair,
   createProvenanceRepairHttpAdapter,
+  createProvenanceRepairInspectionHttpAdapter,
   createProvenanceRepairAdapterFromEnv,
+  createProvenanceRepairInspectionAdapterFromEnv,
   type RepairAdapter,
   type RepairState,
 } from './phase10-provenance-repair.ts'
@@ -26,11 +28,13 @@ const manifestRecord = {
 }
 const manifestText = JSON.stringify(manifestRecord)
 const readManifest = () => manifestText
+const trustedProvenance = loadTrustedProvenancePayload(PHASE10_PROVENANCE_REPAIR.manifestPath, readManifest).source_metadata.provenance
 const historical = { events: [{ id: 'event-1' }], links: [{ event_id: 'event-1' }], reviews: [{ id: 'review-1' }], reconciliation: [{ id: 'reconcile-1', status: 'reviewed' }] }
 
 function state(overrides: Partial<RepairState> = {}): RepairState {
   return {
-    source: { id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, content_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint },
+    source: { id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, is_current: true, content_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, source_metadata: { provenance: trustedProvenance } },
+    sourceChunks: { before: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, is_current: false }], after: [] },
     extraction: null, indexing: null, historical: structuredClone(historical), ...overrides,
   }
 }
@@ -39,9 +43,9 @@ function adapterFor(initial = state(), after = 'a'.repeat(64)): RepairAdapter {
   let current = structuredClone(initial)
   return {
     inspect: async () => structuredClone(current),
-    ingestSource: async () => { current.source = { ...current.source, content_fingerprint: after }; return { source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, content_fingerprint: after } },
-    extractSource: async ({ fingerprint, provenance }) => { current.extraction = { status: 'extracted', source_fingerprint: fingerprint, provenance }; return { status: 'extracted', provenance } },
-    indexSource: async ({ fingerprint, indexerVersion, embeddingModel, embeddingDimensions }) => { current.indexing = { status: 'indexed', source_fingerprint: fingerprint }; return { indexer_version: indexerVersion, embedding_model: embeddingModel, embedding_dimensions: embeddingDimensions } },
+    ingestSource: async () => { current.source = { ...current.source, content_fingerprint: after }; return { source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, operation: 'updated', changed: true } },
+    extractSource: async ({ fingerprint, provenance }) => { current.extraction = { status: 'extracted', source_fingerprint: fingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion, provenance }; return { status: 'extracted', source_fingerprint: fingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion, provenance } },
+    indexSource: async ({ fingerprint, indexerVersion, embeddingModel, embeddingDimensions }) => { current.indexing = { status: 'indexed', source_fingerprint: fingerprint, indexer_version: indexerVersion, embedding_model: embeddingModel, embedding_dimensions: embeddingDimensions }; current.sourceChunks.after = [{ source_fingerprint: fingerprint, indexer_version: indexerVersion, embedding_model: embeddingModel, embedding_dimensions: embeddingDimensions, chunk_index: 0, is_current: true }]; return { status: 'indexed', source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, cached: false, persisted_chunks: 1, source_fingerprint: fingerprint, indexer_version: indexerVersion, embedding_model: embeddingModel, embedding_dimensions: embeddingDimensions } },
   }
 }
 
@@ -55,8 +59,8 @@ describe('guarded Phase 10 provenance repair', () => {
   it('defaults to dry-run and requires --execute for writes', async () => {
     expect(parseProvenanceRepairArguments([PHASE10_PROVENANCE_REPAIR.postId])).toEqual({ postId: PHASE10_PROVENANCE_REPAIR.postId, execute: false })
     expect(parseProvenanceRepairArguments([PHASE10_PROVENANCE_REPAIR.postId, '--execute']).execute).toBe(true)
-    const result = await runProvenanceRepair({ readManifest })
-    expect(result).toMatchObject({ mode: 'dry-run', non_mutating: true, writes: 0 })
+    const result = await runProvenanceRepair({ readManifest, adapter: adapterFor() })
+    expect(result).toMatchObject({ mode: 'dry-run', non_mutating: true, writes: 0, classification: 'exact before' })
     await expect(runProvenanceRepair({ execute: true, readManifest })).rejects.toThrow(/adapter/)
   })
 
@@ -84,11 +88,88 @@ describe('guarded Phase 10 provenance repair', () => {
 
   it('is resumable/idempotent when extraction and indexing are already terminal', async () => {
     const calls: string[] = []
-    const adapter = adapterFor({ ...state(), extraction: { status: 'extracted' }, indexing: { status: 'indexed' } })
+    const adapter = adapterFor({ ...state(), extraction: { status: 'extracted', source_fingerprint: 'a'.repeat(64), extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion }, indexing: { status: 'indexed', source_fingerprint: 'a'.repeat(64), indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: PHASE10_PROVENANCE_REPAIR.embeddingDimensions } })
     const guarded = { ...adapter, extractSource: async () => { calls.push('extract'); return {} }, indexSource: async () => { calls.push('index'); return {} } }
     const result = await runProvenanceRepair({ execute: true, adapter: guarded, readManifest })
     expect(result.outcome).toBe('completed')
     expect(calls).toEqual([])
+  })
+
+  it('returns zero-write completion when the exact after-state is already present', async () => {
+    const calls: string[] = []
+    const complete = adapterFor({
+      ...state({ extraction: { status: 'extracted' }, indexing: { status: 'indexed' } }),
+      source: { id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, is_current: true, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, source_metadata: { provenance: trustedProvenance } },
+      sourceChunks: { before: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, is_current: false }], after: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: 768, chunk_index: 0, is_current: true }] },
+      extraction: { status: 'extracted', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion },
+      indexing: { status: 'indexed', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: PHASE10_PROVENANCE_REPAIR.embeddingDimensions },
+    })
+    const guarded = { ...complete, ingestSource: async () => { calls.push('ingest'); return {} } }
+    const result = await runProvenanceRepair({ execute: true, adapter: guarded, readManifest })
+    expect(result).toMatchObject({ outcome: 'completed', writes: 0, fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint })
+    expect(calls).toEqual([])
+  })
+
+  it.each([
+    ['missing current chunks', []],
+    ['non-current current chunks', [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: 768, chunk_index: 0, is_current: false }]],
+  ])('does not treat %s as exact-after complete', async (_label, afterChunks) => {
+    const incomplete = adapterFor({
+      ...state(),
+      source: { ...state().source!, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint },
+      extraction: { status: 'extracted', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion },
+      indexing: { status: 'indexed', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: 768 },
+      sourceChunks: { before: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, is_current: false }], after: afterChunks },
+    })
+    const result = await runProvenanceRepair({ readManifest, adapter: incomplete })
+    expect(result).toMatchObject({ classification: 'partial', writes: 0 })
+  })
+
+  it('rejects mixed currentness in either fingerprint set', async () => {
+    const mixed = adapterFor({
+      ...state({ extraction: { status: 'extracted' }, indexing: { status: 'indexed' } }),
+      source: { ...state().source!, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint },
+      extraction: { status: 'extracted', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, extractor_version: PHASE10_PROVENANCE_REPAIR.extractionVersion },
+      indexing: { status: 'indexed', source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: 768 },
+      sourceChunks: {
+        before: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, is_current: false }, { source_fingerprint: PHASE10_PROVENANCE_REPAIR.beforeFingerprint, is_current: true }],
+        after: [{ source_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint, indexer_version: PHASE10_PROVENANCE_REPAIR.indexerVersion, embedding_model: PHASE10_PROVENANCE_REPAIR.embeddingModel, embedding_dimensions: 768, chunk_index: 0, is_current: true }],
+      },
+    })
+    await expect(runProvenanceRepair({ execute: true, adapter: mixed, readManifest })).rejects.toThrow(/BEFORE fingerprint/)
+  })
+
+  it('classifies partial and unknown dry-run state without invoking writes', async () => {
+    const calls: string[] = []
+    const partial = adapterFor({ ...state(), source: { ...state().source!, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint }, extraction: { status: 'processing' } })
+    const result = await runProvenanceRepair({ readManifest, adapter: { ...partial, ingestSource: async () => { calls.push('write'); return {} } } })
+    expect(result).toMatchObject({ classification: 'partial', writes: 0 })
+    expect(calls).toEqual([])
+    const unknown = await runProvenanceRepair({ readManifest, adapter: { ...partial, inspect: async () => ({ ...state(), source: null }) } })
+    expect(unknown).toMatchObject({ classification: 'unknown', writes: 0 })
+  })
+
+  it('supports a CLI-independent inspection adapter and never calls mutation methods in dry-run', async () => {
+    const calls: string[] = []
+    const inspection = createProvenanceRepairInspectionHttpAdapter({
+      supabaseUrl: 'https://example.supabase.co', serviceKey: 'service',
+      transport: async (_url, init) => { calls.push(init.method ?? ''); return new Response('[]') },
+    })
+    const guarded: RepairAdapter = {
+      ...inspection,
+      ingestSource: async () => { calls.push('ingest'); throw new Error('unexpected mutation') },
+      extractSource: async () => { calls.push('extract'); throw new Error('unexpected mutation') },
+      indexSource: async () => { calls.push('index'); throw new Error('unexpected mutation') },
+      inspect: async () => state({ source: null }),
+    }
+    const result = await runProvenanceRepair({ readManifest, adapter: guarded })
+    expect(result).toMatchObject({ mode: 'dry-run', non_mutating: true, writes: 0, classification: 'unknown' })
+    expect(calls).toEqual([])
+  })
+
+  it('does not treat invalid terminal statuses or incomplete metadata as complete', async () => {
+    const invalid = adapterFor({ ...state({ extraction: { status: 'permanent_error' }, indexing: { status: 'processing' } }), source: { ...state().source!, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint } })
+    await expect(runProvenanceRepair({ execute: true, adapter: invalid, readManifest })).rejects.toThrow(/BEFORE fingerprint/)
   })
 
   it('fails closed on exact before-image mismatch and unchanged transition', async () => {
@@ -131,12 +212,28 @@ describe('guarded Phase 10 provenance repair', () => {
     expect(calls.some(({ url }) => url.includes('/event_reconciliation_reviews?'))).toBe(true)
   })
 
+  it('inspects both exact source chunk fingerprints with GET-only, metadata-bearing queries', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const transport = async (url: string, init: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/sources?')) return new Response(JSON.stringify([{ id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, content_fingerprint: PHASE10_PROVENANCE_REPAIR.afterFingerprint }]))
+      return new Response('[]')
+    }
+    await createProvenanceRepairInspectionHttpAdapter({ supabaseUrl: 'https://example.supabase.co', serviceKey: 'service', transport }).inspect(PHASE10_PROVENANCE_REPAIR.sourceUuid, PHASE10_PROVENANCE_REPAIR.postId)
+    const chunkCalls = calls.filter(({ url }) => url.includes('/source_chunks?'))
+    expect(chunkCalls).toHaveLength(2)
+    expect(chunkCalls.map(({ url }) => url).join('\n')).toContain(`source_fingerprint=eq.${PHASE10_PROVENANCE_REPAIR.beforeFingerprint}`)
+    expect(chunkCalls.map(({ url }) => url).join('\n')).toContain(`source_fingerprint=eq.${PHASE10_PROVENANCE_REPAIR.afterFingerprint}`)
+    expect(chunkCalls.every(({ url, init }) => init.method === 'GET' && new URL(url).searchParams.get('select') === 'source_fingerprint,indexer_version,embedding_model,embedding_dimensions,chunk_index,is_current')).toBe(true)
+  })
+
   it('authenticates canonical ingest and worker endpoints without terminal recovery headers or paths', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = []
     const transport = async (url: string, init: RequestInit) => {
       calls.push({ url, init })
-      if (url.includes('/rpc/ingest_source')) return new Response(JSON.stringify([{ source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, content_fingerprint: 'a'.repeat(64) }]))
-      return new Response(JSON.stringify({ status: 'processing' }))
+      if (url.includes('/rpc/ingest_source')) return new Response(JSON.stringify({ source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, operation: 'updated', changed: true }))
+      if (url.includes('/functions/v1/index-source')) return new Response(JSON.stringify({ status: 'indexed', source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, cached: true, persisted_chunks: 0 }))
+      return new Response(JSON.stringify({ status: 'extracted' }))
     }
     const adapter = createProvenanceRepairHttpAdapter({ supabaseUrl: 'https://example.supabase.co', serviceKey: 'service', operatorToken: 'operator', extractionToken: 'extract', indexingToken: 'index', transport })
     const payload = loadTrustedProvenancePayload(PHASE10_PROVENANCE_REPAIR.manifestPath, readManifest)
@@ -145,10 +242,22 @@ describe('guarded Phase 10 provenance repair', () => {
     await adapter.indexSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: 'a'.repeat(64), indexerVersion: PHASE10_PROVENANCE_REPAIR.indexerVersion, embeddingModel: PHASE10_PROVENANCE_REPAIR.embeddingModel, embeddingDimensions: 768 })
     expect(calls.map(({ url }) => new URL(url).pathname)).toEqual(['/rest/v1/rpc/ingest_source', '/functions/v1/extract-source', '/functions/v1/index-source'])
     expect(calls[0].init.headers).toMatchObject({ apikey: 'service', authorization: 'Bearer service' })
-    expect(calls[1].init.headers).toMatchObject({ 'x-extraction-token': 'extract' })
+    expect(calls[1].init.headers).toMatchObject({ 'x-extraction-token': 'extract', 'x-phase10-operator-token': 'operator' })
     expect(calls[2].init.headers).toMatchObject({ 'x-index-source-token': 'index' })
     expect(calls.some(({ url }) => url.includes('terminal'))).toBe(false)
-    expect(calls.some(({ init }) => Object.keys(init.headers as object).some(key => key.includes('operator')))).toBe(false)
+    expect(calls[1].init.headers).toMatchObject({ 'x-phase10-operator-token': 'operator' })
+  })
+
+  it('accepts canonical ingest array and index-source status/cache/persisted contract', async () => {
+    const responses = [
+      JSON.stringify([{ source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, post_id: PHASE10_PROVENANCE_REPAIR.postId, operation: 'updated', changed: true }]),
+      JSON.stringify({ status: 'indexed', source_id: PHASE10_PROVENANCE_REPAIR.sourceUuid, cached: false, persisted_chunks: 3, review_reasons: [] }),
+    ]
+    const transport = async () => new Response(responses.shift() ?? '{}')
+    const adapter = createProvenanceRepairHttpAdapter({ supabaseUrl: 'https://example.supabase.co', serviceKey: 'service', operatorToken: 'operator', extractionToken: 'extract', indexingToken: 'index', transport })
+    const payload = loadTrustedProvenancePayload(PHASE10_PROVENANCE_REPAIR.manifestPath, readManifest)
+    await expect(adapter.ingestSource(payload)).resolves.toMatchObject({ operation: 'updated', changed: true })
+    await expect(adapter.indexSource({ sourceId: PHASE10_PROVENANCE_REPAIR.sourceUuid, fingerprint: 'a'.repeat(64), indexerVersion: PHASE10_PROVENANCE_REPAIR.indexerVersion, embeddingModel: PHASE10_PROVENANCE_REPAIR.embeddingModel, embeddingDimensions: 768 })).resolves.toMatchObject({ status: 'indexed', cached: false, persisted_chunks: 3 })
   })
 
   it('constructs the CLI execute adapter from the shared env loader', () => {
@@ -158,6 +267,22 @@ describe('guarded Phase 10 provenance repair', () => {
       const adapter = createProvenanceRepairAdapterFromEnv()
       expect(adapter).toBeDefined()
       expect(adapter.inspect).toBeTypeOf('function')
+    } finally {
+      for (const [name, value] of Object.entries(previous)) if (value === undefined) delete process.env[name]; else process.env[name] = value
+    }
+  })
+
+  it('constructs the CLI dry-run inspection adapter with only read configuration and fails closed when missing', () => {
+    const names = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'PHASE10_OPERATOR_TOKEN', 'EXTRACT_SOURCE_TOKEN', 'INDEX_SOURCE_TOKEN']
+    const previous = Object.fromEntries(names.map(name => [name, process.env[name]]))
+    try {
+      Object.assign(process.env, { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SECRET_KEY: 'service' })
+      delete process.env.PHASE10_OPERATOR_TOKEN
+      delete process.env.EXTRACT_SOURCE_TOKEN
+      delete process.env.INDEX_SOURCE_TOKEN
+      const adapter = createProvenanceRepairInspectionAdapterFromEnv()
+      expect(adapter.inspect).toBeTypeOf('function')
+      expect(() => createProvenanceRepairInspectionHttpAdapter({ supabaseUrl: '', serviceKey: '' })).toThrow(/incomplete provenance repair inspection HTTP configuration/)
     } finally {
       for (const [name, value] of Object.entries(previous)) if (value === undefined) delete process.env[name]; else process.env[name] = value
     }
