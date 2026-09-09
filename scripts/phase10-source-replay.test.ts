@@ -1,11 +1,34 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildReplayPlan, createPhase10HttpAdapter, PHASE10_SOURCE_REPLAY, parseReplayArguments, replayExitCode, runSourceReplay } from './phase10-source-replay.ts'
 import { validateManifestRecord } from './phase10-manifest-intake.ts'
+import { loadEnvLocal } from './phase10-status.ts'
 
 const payload = validateManifestRecord({ platform: 'facebook', post_id: PHASE10_SOURCE_REPLAY.postId, post_url: `https://www.facebook.com/Buglasan/posts/${PHASE10_SOURCE_REPLAY.postId}`, published_at: null, post_year: 2026, festival_year: 2026, raw_text: 'replay fixture', normalized_text: 'replay fixture', title: 'fixture', source_type: 'text', media_urls: [], collected_at: '2026-09-01T00:00:00Z', collection_method: 'manual', source_metadata: { provenance: { operator: 'test', reviewed_at: '2026-09-01', capture_note: 'test' } }, provenance: { operator: 'test', reviewed_at: '2026-09-01', capture_note: 'test' } })
 const empty = { source: null, extraction: null, indexing: null, reconciliation: [] }
 
 describe('Phase 10 hard-bound source replay', () => {
+  it('loads ignored .env.local values before replay credential reads while preserving process precedence', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'phase10-replay-env-'))
+    const path = join(directory, '.env.local')
+    const names = ['SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'PHASE10_OPERATOR_TOKEN']
+    const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]))
+    try {
+      writeFileSync(path, 'SUPABASE_URL=https://from-file.example\nSUPABASE_SECRET_KEY="file-secret"\nPHASE10_OPERATOR_TOKEN=file-operator\n')
+      delete process.env.SUPABASE_URL
+      delete process.env.SUPABASE_SECRET_KEY
+      process.env.PHASE10_OPERATOR_TOKEN = 'process-operator'
+      loadEnvLocal(path)
+      expect(process.env.SUPABASE_URL).toBe('https://from-file.example')
+      expect(process.env.SUPABASE_SECRET_KEY).toBe('file-secret')
+      expect(process.env.PHASE10_OPERATOR_TOKEN).toBe('process-operator')
+    } finally {
+      for (const name of names) if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name]
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
   it('accepts only the exact command identity and defaults to dry run', async () => {
     expect(parseReplayArguments([PHASE10_SOURCE_REPLAY.postId])).toEqual({ postId: PHASE10_SOURCE_REPLAY.postId, execute: false })
     expect(parseReplayArguments([PHASE10_SOURCE_REPLAY.postId, '--execute']).execute).toBe(true)

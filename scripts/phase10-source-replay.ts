@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs'
 import process from 'node:process'
 import { parseManifestText, validateManifest } from './phase10-manifest-intake.ts'
+import { loadEnvLocal } from './phase10-status.ts'
 import type { SourceIngestionPayload } from '../src/ingestion/sourceIngestion.ts'
 
 export const PHASE10_SOURCE_REPLAY = Object.freeze({
@@ -233,6 +234,7 @@ export function replayExitCode(result: Record<string, unknown>): number {
 }
 
 if (import.meta.main) {
+  loadEnvLocal()
   const { execute } = parseReplayArguments(process.argv.slice(2))
   const adapter = execute ? createPhase10HttpAdapter({
     supabaseUrl: process.env.SUPABASE_URL ?? '', serviceKey: process.env.SUPABASE_SECRET_KEY ?? '',
