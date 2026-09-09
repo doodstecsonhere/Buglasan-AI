@@ -49,7 +49,10 @@ function redact(value: unknown): unknown {
 
 async function getRows(base: string, key: string, path: string, request: ReadRequest): Promise<Row[]> {
   const response = await request(`${base}/rest/v1/${path}`, { method: 'GET', redirect: 'error', headers: { apikey: key, authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) })
-  if (!response.ok) throw new Error(`read failed: HTTP ${response.status}`)
+  if (!response.ok) {
+    const detail = response.status >= 400 && response.status < 500 ? (await response.text()).replace(/https?:\/\/[^\s"']+/gi, '[url redacted]').replace(/(bearer|apikey|secret|token|password|credential|authorization)(?:\s*[:=]\s*|\s+)[^\s,;}]*/gi, '[redacted]').slice(0, 500) : ''
+    throw new Error(`read failed: HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
+  }
   const label = path.split('?')[0]
   const result = rows(await response.json(), label)
   for (const row of result) {
@@ -57,6 +60,11 @@ async function getRows(base: string, key: string, path: string, request: ReadReq
     if (label === 'source_chunks') required(row, ['content', 'is_current'], label)
   }
   return result
+}
+
+async function getRowsByIds(base: string, key: string, table: string, column: string, ids: unknown[], suffix: string, request: ReadRequest): Promise<Row[]> {
+  if (ids.length === 0) return []
+  return getRows(base, key, `${table}?${column}=in.(${ids.map(enc).join(',')})${suffix}`, request)
 }
 
 /** Inspect only manifest-bound, current, non-fixture rows. Every collection is bounded. */
@@ -92,8 +100,8 @@ export async function inspectManifest(manifest: unknown[], options: InspectorOpt
       getRows(options.url, options.key, `source_chunks?source_id=eq.${enc(sourceId)}&is_current=eq.true&select=id,source_id,chunk_index,content,content_hash,source_fingerprint,indexer_version,embedding_model,embedding_dimensions,is_current&limit=${limit + 1}`, request),
       getRows(options.url, options.key, `event_reconciliation_runs?candidate_source_id=eq.${enc(sourceId)}&select=*&limit=${limit + 1}`, request),
     ])
-    const associations = await getRows(options.url, options.key, `event_candidate_associations?select=*&candidate_event_id=in.(${events.map((row) => enc(row.id)).join(',') || 'null'})&limit=${limit + 1}`, request)
-    const versions = await getRows(options.url, options.key, `canonical_event_versions?canonical_event_id=in.(${associations.map((row) => enc(row.canonical_event_id)).filter(Boolean).join(',') || 'null'})&select=*&limit=${limit + 1}`, request)
+    const associations = await getRowsByIds(options.url, options.key, 'event_candidate_associations', 'candidate_event_id', events.map((row) => row.id), '&select=*&limit=' + (limit + 1), request)
+    const versions = await getRowsByIds(options.url, options.key, 'canonical_event_versions', 'canonical_event_id', associations.map((row) => row.canonical_event_id).filter(Boolean), '&select=*&limit=' + (limit + 1), request)
     const history = await getRows(options.url, options.key, `canonical_event_field_history?source_id=eq.${enc(sourceId)}&select=*&limit=${limit + 1}`, request)
     for (const [kind, collection] of [['extraction', extractions], ['indexing', indexings], ['reconciliation', runs]] as const) for (const row of collection) if (row.status === 'permanent_error') terminalFailures.push({ source_id: sourceId, post_id: source.post_id, kind, status: row.status, error_code: row.last_error_code, attempt_count: row.attempt_count })
     inspected.push({

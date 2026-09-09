@@ -19,6 +19,16 @@ function mockFetch(rows: Record<string, unknown>[], calls: string[]) {
   }
 }
 
+function requestFor(rows: Record<string, unknown>[], calls: string[], failingPath?: string) {
+  return async (url: string, init?: RequestInit) => {
+    calls.push(`${init?.method}:${url}`)
+    if (failingPath && url.includes(failingPath)) return new Response('bad https://secret.example/token=abc authorization=Bearer xyz', { status: 400 })
+    if (url.includes('/sources?')) return Response.json(rows)
+    if (url.includes('source_chunks')) return Response.json([{ id: 'chunk', source_id: source.id, chunk_index: 0, content: 'August 23', is_current: true }])
+    return Response.json([])
+  }
+}
+
 describe('Phase 10 exact-ten corpus inspector', () => {
   it('resolves the manifest identity, reads stored evidence, and stays GET-only', async () => {
     const calls: string[] = []
@@ -27,6 +37,22 @@ describe('Phase 10 exact-ten corpus inspector', () => {
     expect(report.evidence_check).toMatchObject({ post_id: AUGUST_23_POST_ID, matched: true, stored_source_or_chunk_text_only: true })
     expect(calls.every((call) => call.startsWith('GET:'))).toBe(true)
     expect(JSON.stringify(report)).not.toContain('secret')
+  })
+  it('skips empty UUID in queries and preserves corrected request shape', async () => {
+    const calls: string[] = []
+    await inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: requestFor([source], calls) })
+    expect(calls.some((call) => call.includes('candidate_event_id=in.'))).toBe(false)
+    expect(calls.some((call) => call.includes('canonical_event_id=in.'))).toBe(false)
+    expect(calls.every((call) => call.startsWith('GET:'))).toBe(true)
+  })
+  it('fails closed with bounded sanitized 4xx diagnostics', async () => {
+    const calls: string[] = []
+    await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: requestFor([source], calls, 'events?') })).rejects.toThrow(/HTTP 400/)
+    try { await inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: requestFor([source], [], 'events?') }) } catch (error) {
+      const message = String(error)
+      expect(message.length).toBeLessThan(560)
+      expect(message).not.toMatch(/secret|authorization|bearer|https?:\/\//i)
+    }
   })
   it.each([
     ['missing', []],
