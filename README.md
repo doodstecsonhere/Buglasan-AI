@@ -132,6 +132,14 @@ The app starts at `http://localhost:5173` in **demo mode** by default (no backen
 
 Phase 6 evidence-grounded event extraction is documented in [`docs/knowledge-extraction.md`](docs/knowledge-extraction.md). It is a separate, inactive n8n Workflow B and does not add chunks or embeddings.
 
+### Production launch and PWA behavior
+
+The frontend is a static Vite build. Run `npm run build` and deploy the generated `dist/` directory to any HTTPS static-hosting provider with SPA history fallback to `index.html`. No repository deployment configuration (for example, Vercel, Netlify, GitHub Pages, or a container definition) is committed, so a hosting target and public site URL remain deployment-time configuration.
+
+The production build registers [`public/service-worker.js`](public/service-worker.js), which caches the install shell and serves [`public/offline.html`](public/offline.html) for failed navigation requests. It deliberately does **not** cache chat API responses, preserving the live backend contract and avoiding stale festival answers. Browser-local chat history is stored under the versioned `buglasan-ai.chat-threads.v1` key and stays on the visitor's device; clearing site data deletes it.
+
+The app includes an install manifest, vector app icons, mobile metadata, reduced-motion handling, keyboard-visible focus, an accessible composer, live status/error messaging, citations with outbound-source labels, and a reply-language selector for English, Bisaya, and Filipino.
+
 ---
 
 ## 🔐 Environment Variables

@@ -2,7 +2,9 @@
   "name": "Buglasan AI",
   "short_name": "Buglasan AI",
   "description": "A multilingual, year-aware AI companion for the Buglasan Festival of Negros Oriental",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#FAFAFA",
   "theme_color": "#E53E3E",
@@ -28,5 +30,6 @@
     }
   ],
   "categories": ["festival", "events", "travel", "lifestyle"],
-  "lang": "en-PH"
+  "lang": "en-PH",
+  "dir": "ltr"
 }

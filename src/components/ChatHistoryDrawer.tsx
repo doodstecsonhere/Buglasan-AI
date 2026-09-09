@@ -14,12 +14,12 @@ export function ChatHistoryDrawer({ threads, activeThreadId, open, onClose, onNe
   return (
     <>
       {open && <button className="fixed inset-0 z-40 bg-slate-950/35 md:hidden" onClick={onClose} aria-label="Close chat history" />}
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,340px)] flex-col bg-white shadow-2xl transition-transform duration-200 md:relative md:z-auto md:shadow-none ${open ? 'translate-x-0' : '-translate-x-full md:hidden'}`} aria-label="Chat history">
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[min(88vw,340px)] flex-col bg-white shadow-2xl transition-transform duration-200 md:relative md:z-auto md:shadow-none ${open ? 'translate-x-0' : '-translate-x-full md:hidden'}`} aria-label="Chat history" aria-hidden={!open && undefined}>
         <div className="flex items-center justify-between border-b border-neutral-100 px-5 py-5">
           <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-fiesta-red">Your chats</p><h2 className="mt-1 text-lg font-bold text-slate-900">Conversation history</h2></div>
-          <button onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-neutral-100 md:hidden" aria-label="Close chat history">×</button>
+          <button onClick={onClose} className="rounded-full p-2 text-slate-500 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-fiesta-red md:hidden" aria-label="Close chat history">×</button>
         </div>
-        <button onClick={onNew} className="mx-4 my-4 flex items-center justify-center gap-2 rounded-xl bg-fiesta-red px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-fiesta-red-dark">＋ New Chat</button>
+        <button onClick={onNew} className="mx-4 my-4 flex items-center justify-center gap-2 rounded-xl bg-fiesta-red px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-fiesta-red-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fiesta-red">＋ New Chat</button>
         <div className="flex-1 overflow-y-auto px-3 pb-4">
           {threads.length === 0 && <p className="px-3 py-8 text-center text-sm text-neutral-500">Your saved conversations will appear here.</p>}
           {threads.map(thread => (
