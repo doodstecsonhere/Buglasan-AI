@@ -107,6 +107,11 @@ describe('Phase 10 exact-ten corpus inspector', () => {
     const request = mockFetch([source], [])
     await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: async (url, init) => url.includes('source_chunks') ? Response.json([{ is_current: true }]) : request(url, init) })).rejects.toThrow(/content/)
   })
+  it('selects currentness with evidence content so the shared row validator remains sound', async () => {
+    const calls: string[] = []
+    await inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', request: mockFetch([source], calls) })
+    expect(calls.some((call) => call.includes('source_chunks?') && call.includes('select=content,is_current'))).toBe(true)
+  })
   it('bounds source output and argument shape', async () => {
     await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', maxRows: 0, request: mockFetch([source], []) })).rejects.toThrow(/positive integer/)
     await expect(inspectManifest(manifest, { url: 'https://example.supabase.co', key: 'secret', maxRows: 1.5, request: mockFetch([source], []) })).rejects.toThrow(/positive integer/)

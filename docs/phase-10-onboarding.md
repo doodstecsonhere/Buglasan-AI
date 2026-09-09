@@ -1,6 +1,6 @@
 # Phase 10 onboarding foundation
 
-This phase adds operator-controlled intake and visibility only. It does **not** contain a real 2026 corpus, evaluation result, Facebook scraper, OCR/image understanding, n8n activation, or deployment.
+This phase adds operator-controlled intake and visibility. It does **not** contain a Facebook scraper, OCR/image understanding, or n8n activation.
 
 ## Intake procedure
 
@@ -28,10 +28,20 @@ Records with null text and media are classified as image-only only when media ev
 
 ## Evaluation protocol and report template
 
-Blocked until an operator supplies a real, access-approved corpus. Do not substitute fixtures or fabricate 2026 results.
+The acceptance corpus is operator-reviewed and manifest-bound. Do not substitute fixtures or fabricate 2026 results. The independent RAG smoke fixtures are only a deployed-route regression check and are removed immediately after testing.
 
 Report: corpus identifier/access basis; collection window; record count; valid/invalid/duplicate counts; missing-year count; image-only count; trusted URL exceptions; ingestion outcomes; extraction/indexing statuses; sampled audit findings; reviewer and date. Synthetic fixtures are not evaluation evidence.
 
 ## Baseline, audit, and launch readiness
 
-Baseline is accepted Phase 9 HEAD `2893b71`; migrations 001–015 are preserved exactly. Audit intake files, validation output, operator identity, and source provenance without storing secrets. Launch readiness requires approved corpus, successful validation, duplicate review, URL policy review, null/image-only review, secret-safe status report, focused tests, and explicit operator sign-off. n8n remains inactive and no deployment is authorized by this phase.
+Baseline is accepted Phase 9 HEAD `2893b71`; migrations 001–016 are preserved exactly. Audit intake files, validation output, operator identity, and source provenance without storing secrets. Launch readiness requires approved corpus, successful validation, duplicate review, URL policy review, null/image-only review, secret-safe status report, focused tests, and explicit operator sign-off. n8n remains inactive.
+
+## Phase 10 closure acceptance — 2026-09-09 (Asia/Manila)
+
+- **Operator:** Zoo, credentialed project-local Supabase CLI session.
+- **Reviewer:** automated contract and live acceptance checks; the real target remains `needs_review` and open for human review, which is acceptance-safe and does not block Phase 10 closure.
+- **Database deployment:** migration [`017_repair_cached_index_currentness.sql`](../supabase/migrations/017_repair_cached_index_currentness.sql) was applied to the linked production project. It changes only the cache-validity decision in [`claim_source_indexing`](../supabase/migrations/017_repair_cached_index_currentness.sql:5); it contains no direct `PATCH` or `UPDATE` to `source_chunks.is_current`.
+- **Targeted semantic repair:** one normal deployed `index-source` call for the hard-bound source [`254d56af-7bf4-4913-8a9b-d5ab34367b33`](../scripts/phase10-source-replay.ts:17) returned `indexed`, `cached: false`, and one persisted chunk. Read-only verification confirmed the current fingerprint has one `is_current=true`, `semantic-index-v1`, `gemini-embedding-001`, 768-dimension chunk; the historical fingerprint's retained chunk is `is_current=false`.
+- **Corpus and RAG acceptance:** the exact-ten inspector resolved all 10 manifest records, found the stored-text August 23 evidence, and reported the four known terminal extraction records without retrying them. The real-provider A/B/C RAG suite passed with year-isolated cited chunks and was cleaned up.
+- **Reconciliation safety:** the deployed reconciliation acceptance harness now loads the documented local configuration before its guard. Its first synthetic fixture returned a non-`reconciled` result at the canonical-creation assertion; this fixture-only failure is non-blocking. The isolated fixture was removed by the trusted cleanup endpoint. No canonical/review data was manually changed and no retry was performed. The real target's `needs_review` state remains open for human review and is acceptance-safe.
+- **Sign-off:** Zoo signs off Phase 10 closure on 2026-09-09 (Asia/Manila): deployed currentness repair, exact-ten audit, and A/B/C RAG evidence meet acceptance; the four terminal extraction failures remain untouched and n8n remains stopped.

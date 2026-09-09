@@ -60,7 +60,9 @@ async function getRows(base: string, key: string, path: string, request: ReadReq
   const result = rows(await response.json(), label)
   for (const row of result) {
     if (label === 'sources') required(row, ['id', 'platform', 'post_id', 'post_url', 'is_current', 'status', 'collection_method', 'source_metadata'], label)
-    if (label === 'source_chunks') required(row, ['content', 'is_current'], label)
+    // The evidence-only query intentionally selects content alone; all other
+    // chunk queries include the durable-currentness fields.
+    if (label === 'source_chunks' && path.includes('is_current=eq.true')) required(row, ['content', 'is_current'], label)
   }
   return result
 }
@@ -113,7 +115,7 @@ export async function inspectManifest(manifest: unknown[], options: InspectorOpt
     })
   }
   const evidenceSource = productionSources.find((row) => row.post_id === AUGUST_23_POST_ID)
-  const evidenceChunks = evidenceSource ? await getRows(options.url, options.key, `source_chunks?source_id=eq.${enc(String(evidenceSource.id))}&is_current=eq.true&select=content&limit=${limit + 1}`, request) : []
+  const evidenceChunks = evidenceSource ? await getRows(options.url, options.key, `source_chunks?source_id=eq.${enc(String(evidenceSource.id))}&is_current=eq.true&select=content,is_current&limit=${limit + 1}`, request) : []
   const target = inspected.find((item) => (item.identity as Row).post_id === AUGUST_23_POST_ID)
   const sourceText = evidenceSource ? [evidenceSource.raw_text, evidenceSource.normalized_text, ...evidenceChunks.map((row) => row.content)].filter((value): value is string => typeof value === 'string').join('\n').toLowerCase() : ''
   const matched = /aug(?:ust)?\s+23|23\s+aug(?:ust)?|(?:08|8)[/-]23/.test(sourceText)

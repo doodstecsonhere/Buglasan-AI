@@ -1,3 +1,10 @@
+import process from 'node:process'
+
+// Live acceptance commands are invoked through package scripts rather than
+// `node --env-file`; load the documented local operator configuration before
+// taking the immutable environment snapshot below.
+process.loadEnvFile('.env.local')
+
 const prefix = 'reconciliation-test-'
 const fixtureIds = ['reconciliation-test-01-create', 'reconciliation-test-02-identical', 'reconciliation-test-03-reschedule', 'reconciliation-test-04-cancellation', 'reconciliation-test-05-conflicting-date', 'reconciliation-test-06-distinct', 'reconciliation-test-07-registration-extension', 'reconciliation-test-08-venue-change', 'reconciliation-test-09-postponement', 'reconciliation-test-10-new-schedule', 'reconciliation-test-11-null-year', 'reconciliation-test-12-replay'] as const
 const sourceText: Record<(typeof fixtureIds)[number], string> = {
@@ -207,5 +214,3 @@ async function verifyCleanup(): Promise<void> {
 
 const mode = process.argv[2]
 if (mode === '--acceptance') await acceptance(); else if (mode === '--scenario-4') await scenario4Acceptance(); else if (mode === '--scenario-7') await scenario7Acceptance(); else if (mode === '--scenario-10') await scenario10Acceptance(); else if (mode === '--scenario-12') await scenario12Acceptance(); else if (mode === '--cleanup') await cleanup(); else if (mode === '--verify-cleanup') await verifyCleanup(); else throw new Error('Use --acceptance, --scenario-4, --scenario-7, --scenario-10, --scenario-12, --cleanup, or --verify-cleanup')
-
-export {}

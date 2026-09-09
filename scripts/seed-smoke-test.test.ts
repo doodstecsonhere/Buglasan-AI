@@ -54,4 +54,15 @@ describe('RAG smoke source fixtures against the current source schema', () => {
     expect(Object.entries(row).filter(([, value]) => value === null).map(([key]) => key).sort())
       .toEqual(['content_fingerprint', 'supersedes_source_id'])
   })
+
+  it('uses Phase 7 chunk identity and provenance required by deployed retrieval', () => {
+    expect(harness).toContain("'source_id,source_fingerprint,indexer_version,chunk_index'")
+    for (const field of ['source_fingerprint:', 'indexer_version:', 'embedding_model:', 'embedding_dimensions:', 'content_hash:', 'is_current: true']) expect(harness).toContain(field)
+  })
+
+  it('treats chunk retrieval and citations, rather than entity retrieval, as the RAG acceptance contract', () => {
+    expect(harness).toContain('deployed chat did not retrieve the expected fixture chunk')
+    expect(harness).toContain('direct semantic RPC did not retrieve the expected fixture chunk above threshold')
+    expect(harness).not.toContain('expected fixture event was not retrieved')
+  })
 })

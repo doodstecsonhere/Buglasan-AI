@@ -1,7 +1,8 @@
-# Phase 10 terminal retry — repository contract, NOT live approval
+# Phase 10 terminal retry — preserved terminal-state contract
 
-Baseline: main at 3e70b3aeebc3c23347806414bc3ed6515144a165, migrations 001–015.
-Phase 10 is **not accepted**. Phase 11 has **not started**.
+Phase 10 closure was accepted on 2026-09-09 (Asia/Manila). Migrations 001–017 are preserved, including the deployed cache-currentness repair in [`017_repair_cached_index_currentness.sql`](../supabase/migrations/017_repair_cached_index_currentness.sql). Phase 11 has not started.
+
+The four terminal extraction failures below remain deliberately untouched: no recovery endpoint was invoked, no terminal failure was retried, and n8n remains stopped. This historical recovery contract is not an approval to operate on production data.
 
 ## Scope and safety
 
@@ -43,7 +44,7 @@ Regression coverage includes actual service-role truncation and cascading-trunca
 
 The [existing edge handler](../supabase/functions/extract-source/index.ts) can directly invoke reconcile-event after successful extraction when its environment switch and token are enabled. Stopping n8n is insufficient. There is no per-request bypass or read-only configuration attestation in that handler. Repository source cannot prove the deployed v35 environment is disabled, and production configuration was not accessed in this work.
 
-**Live execution is blocked.** No edge change/deployment is included. The new SQL claim alone does not invoke an extractor. Calling the ordinary edge endpoint afterwards does not consume that claim: the fenced ordinary claim returns no owner. Do not work around this with manual resets or direct provider calls.
+**Live execution is outside the accepted Phase 10 closure.** No edge change/deployment is included. The SQL claim alone does not invoke an extractor. Calling the ordinary edge endpoint afterwards does not consume that claim: the fenced ordinary claim returns no owner. Do not work around this with manual resets or direct provider calls.
 
 A later independently authorized change must either prove deployed reconciliation is disabled and design a safe claim-consuming integration, or add and deploy a narrowly capability-bound no-reconcile extraction path. Any successful output must also remain protected from independent dispatcher/reconciliation consumers. This is not solved by the SQL fence and is not claimed as implemented. Do not deploy this migration in isolation as a live run procedure.
 
