@@ -10,19 +10,19 @@ export function SourcesCard({ sources, festivalYear }: SourcesCardProps) {
   if (!sources || sources.length === 0) return null
 
   return (
-    <div className="mt-2 animate-slide-up">
+    <div className="mt-3 animate-slide-up max-w-2xl">
       <details className="group">
-        <summary className="flex items-center gap-2 px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-lg cursor-pointer text-sm font-medium text-neutral-700 hover:bg-neutral-100 transition-colors select-none">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 select-none">
           <svg className="w-4 h-4 text-fiesta-red flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <span>Sources ({sources.length})</span>
+          <span>Evidence · {sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
           <svg className="w-4 h-4 text-neutral-400 ml-auto transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </summary>
         
-        <div className="mt-2 space-y-2 p-2 bg-neutral-50 border border-neutral-200 rounded-lg border-t-none">
+        <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
           {sources.map((source, index) => (
             <div key={source.id} className="space-y-1.5 last:pb-0">
               <div className="flex items-start gap-2">
@@ -32,7 +32,8 @@ export function SourcesCard({ sources, festivalYear }: SourcesCardProps) {
                     href={source.postUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-medium text-fiesta-red hover:text-fiesta-red-dark underline-offset-2 hover:underline text-sm"
+                    className="block break-words text-sm font-semibold text-fiesta-red underline-offset-2 hover:text-fiesta-red-dark hover:underline"
+                    aria-label={`Open source: ${source.title}`}
                   >
                     {source.title}
                   </a>

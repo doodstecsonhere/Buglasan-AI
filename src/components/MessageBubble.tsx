@@ -13,7 +13,7 @@ export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubb
   const timeString = formatRelativeTime(message.timestamp)
   
   return (
-    <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && showAvatar && (
         <div className="flex-shrink-0 w-8 h-8 bg-fiesta-red rounded-full flex items-center justify-center text-white text-xs font-bold">
           🎭
@@ -23,17 +23,17 @@ export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubb
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
         <div
           className={`
-            px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap
+            max-w-full break-words px-4 py-3 text-sm leading-7 whitespace-pre-wrap
             ${isUser
-              ? 'bg-fiesta-red text-white rounded-br-md'
-              : 'bg-white text-neutral-900 border border-neutral-200 rounded-bl-md shadow-sm'
+              ? 'rounded-2xl rounded-br-md bg-fiesta-red text-white shadow-md shadow-red-100'
+              : 'rounded-2xl rounded-bl-md border border-slate-200/80 bg-white text-neutral-900 shadow-sm'
             }
           `}
         >
           {renderCitedContent(message.content, message.sources ?? [])}
         </div>
         
-        <div className={`flex items-center gap-1.5 mt-1 text-xs text-neutral-400 ${isUser ? 'justify-end pr-1' : 'justify-start pl-1'}`}>
+        <div className={`mt-1 flex items-center gap-1.5 text-[11px] text-neutral-400 ${isUser ? 'justify-end pr-1' : 'justify-start pl-1'}`}>
           <span>{timeString}</span>
           {message.festivalYear && message.festivalYear !== festivalYear && (
             <span className="px-1.5 py-0.5 bg-fiesta-red-light text-fiesta-red rounded text-[10px] font-medium">
