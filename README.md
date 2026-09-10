@@ -134,11 +134,15 @@ Phase 6 evidence-grounded event extraction is documented in [`docs/knowledge-ext
 
 ### Production launch and PWA behavior
 
+**Release verification status — code blocker resolved locally (verified 2026-09-10, Asia/Manila).** The intended Cloudflare Pages production URL is [https://buglasan-ai.pages.dev/](https://buglasan-ai.pages.dev/). The active deployment identity is `7a38775f-b32c-4e86-857a-8a4343bd57e0`, built from commit [`032d3c0`](https://github.com/doodstecsonhere/Buglasan-AI/commit/032d3c0). Public-bundle inspection confirmed that no Supabase server/secret key, Gemini/Groq/OpenAI-compatible key, extraction/indexing/reconciliation/operator token, or n8n credential is embedded; the bundle contains only the intended Supabase publishable credential. n8n is not required for a public chat request.
+
+When a production build is made with `VITE_DEMO_MODE=false`, Vite aliases [`src/data/demoData.ts`](src/data/demoData.ts) to the empty, production-safe boundary at [`src/data/demoData.disabled.ts`](src/data/demoData.disabled.ts). This removes all synthetic fixture text from the production module graph rather than relying on an unreachable runtime branch. Run `npm run verify:demo-build-separation` before release: it verifies that fixture markers are absent from every generated output file (including source maps, if enabled) in the live build and retained in an explicitly enabled demo build. The previously inspected deployment remains historical evidence only; a fresh deployment and public-bundle inspection are still required before closing the operational release verification.
+
 The frontend is a static Vite build. Run `npm run build` and deploy the generated `dist/` directory to any HTTPS static-hosting provider with SPA history fallback to `index.html`. No repository deployment configuration (for example, Vercel, Netlify, GitHub Pages, or a container definition) is committed, so a hosting target and public site URL remain deployment-time configuration.
 
 The production build registers [`public/service-worker.js`](public/service-worker.js), which caches the install shell and serves [`public/offline.html`](public/offline.html) for failed navigation requests. It deliberately does **not** cache chat API responses, preserving the live backend contract and avoiding stale festival answers. Browser-local chat history is stored under the versioned `buglasan-ai.chat-threads.v1` key and stays on the visitor's device; clearing site data deletes it.
 
-The app includes an install manifest, vector app icons, mobile metadata, reduced-motion handling, keyboard-visible focus, an accessible composer, live status/error messaging, citations with outbound-source labels, and a reply-language selector for English, Bisaya, and Filipino.
+The app includes an install manifest, vector app icons, mobile metadata, reduced-motion handling, keyboard-visible focus, an accessible composer, live status/error messaging, citations with outbound-source labels, and a reply-language selector for English, Cebuano/Bisaya, and Filipino/Tagalog. PWA support is enabled: the service worker caches the application shell and provides the offline page, while chat replies require the live backend and are intentionally not cached.
 
 ---
 
