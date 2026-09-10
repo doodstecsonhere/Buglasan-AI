@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createChatThread, titleFromMessages } from './chatThreads'
+import { createChatThread, titleFromMessages, updateChatThreadMessages } from './chatThreads'
 
 describe('chat thread persistence helpers', () => {
   it('creates a local title from the first user message', () => {
@@ -19,5 +19,15 @@ describe('chat thread persistence helpers', () => {
 
     expect(title).toBe('Can you share the complete and official Buglasan…')
     expect(title.length).toBeLessThanOrEqual(49)
+  })
+
+  it('updates the originating thread without changing another active thread', () => {
+    const origin = createChatThread([{ id: 'origin-user', role: 'user', content: 'Origin', timestamp: new Date() }])
+    const active = createChatThread([{ id: 'active-user', role: 'user', content: 'Active', timestamp: new Date() }])
+    const response = { id: 'origin-answer', role: 'assistant' as const, content: 'Answer', timestamp: new Date() }
+    const updated = updateChatThreadMessages([active, origin], origin.id, [...origin.messages, response])
+
+    expect(updated.find(thread => thread.id === origin.id)?.messages).toEqual([...origin.messages, response])
+    expect(updated.find(thread => thread.id === active.id)?.messages).toEqual(active.messages)
   })
 })

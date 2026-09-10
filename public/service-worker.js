@@ -1,13 +1,12 @@
-const CACHE_NAME = 'buglasan-ai-shell-v2'
+const CACHE_NAME = 'buglasan-ai-shell-v3'
 const APP_SHELL = [
   '/',
   '/index.html',
   '/offline.html',
   '/manifest.webmanifest',
-  '/favicon.svg',
-  '/icons/icon-192.svg',
-  '/icons/icon-512.svg',
-  '/icons/icon-512-maskable.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-512-maskable.png',
 ]
 const APP_SHELL_PATHS = new Set(APP_SHELL)
 

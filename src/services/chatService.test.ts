@@ -184,6 +184,11 @@ describe('ChatService (demo mode)', () => {
     expect(resolveChatLanguage(message, 'en')).toBe(expected)
   })
 
+  it.each(['en', 'ceb', 'fil'] as const)('keeps %s backend language capability without a UI selector', async (language) => {
+    const response = await new ChatService({ demoMode: true }).sendMessage({ message: 'Schedule', language })
+    expect(response.language).toBe(language)
+  })
+
   it('maps only deduplicated citations to retrieved source records', () => {
     const sources = demoSources.slice(0, 2)
     const mapped = mapValidatedCitations(`Claim _(src: ${sources[0].id})_ [Source 2] [Source 99] _(src: unknown)_ _(src: ${sources[0].id})_`, sources)

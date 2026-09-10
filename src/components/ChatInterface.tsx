@@ -21,9 +21,9 @@ export function ChatInterface({ messages, isLoading, festivalYear, messagesEndRe
           </svg>
         </div>
         <p className="eyebrow">Ask with confidence</p>
-        <h3 className="text-2xl font-bold tracking-tight text-slate-950">Your festival questions,<br className="sm:hidden" /> answered with evidence.</h3>
+        <h3 className="text-2xl font-bold tracking-tight text-slate-950">Your Buglasan questions,<br className="sm:hidden" /> answered with official sources.</h3>
         <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
-          Ask about Buglasan Festival {festivalYear}. I’ll look for official information and show you where each answer comes from.
+          Ask about Buglasan Festival. I’ll look for official information and show you where each answer comes from.
         </p>
       </div>
     )

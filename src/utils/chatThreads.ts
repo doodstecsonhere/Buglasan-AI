@@ -53,3 +53,9 @@ export function createChatThread(messages: Message[]): ChatThread {
   const now = new Date().toISOString()
   return { id: crypto.randomUUID(), title: titleFromMessages(messages), createdAt: now, updatedAt: now, messages }
 }
+
+export function updateChatThreadMessages(threads: ChatThread[], threadId: string, messages: Message[]): ChatThread[] {
+  return threads.map(thread => thread.id === threadId
+    ? { ...thread, messages, title: titleFromMessages(messages), updatedAt: new Date().toISOString() }
+    : thread)
+}
