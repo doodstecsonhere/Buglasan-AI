@@ -74,6 +74,24 @@
 @media (max-width: 767px) {
   .history-sidebar { @apply fixed inset-y-0 left-0 z-50 flex w-[min(88vw,340px)] -translate-x-full flex-col bg-white shadow-2xl transition-transform duration-200; }
   .history-sidebar.is-open { @apply translate-x-0; }
+  .app-shell { height: 100dvh; min-height: 0; }
+  .app-header { @apply px-4 py-2; }
+  .brand-mark { @apply h-8 w-8 rounded-lg text-base; }
+  .brand-name { @apply text-[10px]; }
+  .empty-state { min-height: 0; padding-block: .5rem; }
+  .empty-icon { @apply mb-2 h-10 w-10 rounded-xl; }
+  .empty-icon svg { @apply h-5 w-5; }
+  .eyebrow { @apply mb-1 text-[10px]; }
+  .empty-state h3 { @apply text-xl leading-6; }
+  .empty-state p:last-child { @apply mt-2 text-xs leading-5; }
+  .suggestions { @apply grid grid-cols-3 gap-1.5; }
+  .suggestion { @apply min-h-12 rounded-xl px-2 py-1.5 text-center text-[10px] leading-3; }
+  .composer-dock { @apply py-2; }
+  .composer-input { @apply min-h-10 py-2; }
+  .send-button { @apply h-10 w-10; }
+  .app-shell > footer { @apply px-3 py-1.5; }
+  .app-shell > footer p:first-child { @apply text-[10px] leading-4; }
+  .app-shell > footer p:last-child { @apply hidden; }
 }
 
 @layer utilities {

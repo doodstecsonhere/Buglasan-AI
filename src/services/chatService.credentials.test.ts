@@ -20,6 +20,8 @@ describe('ChatService publishable-key requests', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: override ?? 'public-from-environment' },
       body: JSON.stringify(request),
+      signal: expect.any(AbortSignal),
     })
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(false)
   })
 })

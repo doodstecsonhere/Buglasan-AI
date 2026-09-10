@@ -4,11 +4,10 @@ import { formatRelativeTime } from '../utils/dateUtils'
 
 interface MessageBubbleProps {
   message: Message
-  festivalYear: number
   showAvatar: boolean
 }
 
-export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubbleProps) {
+export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const timeString = formatRelativeTime(message.timestamp)
   
@@ -35,11 +34,6 @@ export function MessageBubble({ message, festivalYear, showAvatar }: MessageBubb
         
         <div className={`mt-1 flex items-center gap-1.5 text-[11px] text-neutral-400 ${isUser ? 'justify-end pr-1' : 'justify-start pl-1'}`}>
           <span>{timeString}</span>
-          {message.festivalYear && message.festivalYear !== festivalYear && (
-            <span className="px-1.5 py-0.5 bg-fiesta-red-light text-fiesta-red rounded text-[10px] font-medium">
-              FY {message.festivalYear}
-            </span>
-          )}
         </div>
       </div>
       

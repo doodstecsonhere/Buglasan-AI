@@ -5,10 +5,10 @@ declare const Deno: { env: { get(name: string): string | undefined } }
 
 export interface ProviderAdapter { readonly provider: ProviderName; readonly model: string; generate(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResponse> }
 
-export function geminiAdapter(model: string, generate: (prompt: string) => Promise<string>): ProviderAdapter {
-  return { provider: 'gemini', model, async generate(request) {
+export function geminiAdapter(model: string, generate: (prompt: string, signal?: AbortSignal) => Promise<string>): ProviderAdapter {
+  return { provider: 'gemini', model, async generate(request, signal) {
     try {
-      const text = await generate(request.prompt)
+      const text = await generate(request.prompt, signal)
       if (typeof text !== 'string' || !text) throw new ProviderError('gemini', 'malformed_output', 'provider response was empty')
       return { text, provider: 'gemini', model }
     } catch (error) {

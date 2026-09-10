@@ -17,8 +17,8 @@
  * would prevent the delay from ever resolving.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
-import { ChatService, mapValidatedCitations, resolveChatLanguage } from './chatService'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { ChatConfigurationError, ChatService, ChatTimeoutError, mapValidatedCitations, resolveChatEndpoint, resolveChatLanguage } from './chatService'
 import { currentYear, previousYear, demoSources } from '../data/demoData'
 
 // We don't mock the date — the demo data is built around `currentYear`,
@@ -226,5 +226,36 @@ describe('ChatService year resolution contract', () => {
     const cy = currentYear
     const response = await service.sendMessage({ message: 'last year schedule' })
     expect(response.yearResolved).toBe(cy - 1)
+  })
+})
+
+describe('ChatService live delivery contract', () => {
+  it('derives the hosted Supabase function endpoint instead of a Pages-relative path', () => {
+    expect(resolveChatEndpoint({ supabaseUrl: 'https://project.supabase.co/' }))
+      .toBe('https://project.supabase.co/functions/v1/chat')
+  })
+
+  it('uses an explicit configured endpoint unchanged apart from a trailing slash', () => {
+    expect(resolveChatEndpoint({ edgeFunctionUrl: 'https://chat.example.com/chat/' }))
+      .toBe('https://chat.example.com/chat')
+  })
+
+  it('fails fast rather than POSTing to an implicit same-origin endpoint', () => {
+    expect(() => resolveChatEndpoint({})).toThrow(ChatConfigurationError)
+  })
+
+  it('aborts a live request at the configured timeout without retrying it', async () => {
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    globalThis.fetch = fetchMock as typeof fetch
+    try {
+      const service = new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat', requestTimeoutMs: 1 })
+      await expect(service.sendMessage({ message: 'Schedule' })).rejects.toBeInstanceOf(ChatTimeoutError)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

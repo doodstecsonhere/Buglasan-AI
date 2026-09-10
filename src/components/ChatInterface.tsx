@@ -7,11 +7,10 @@ import { TypingIndicator } from './TypingIndicator'
 interface ChatInterfaceProps {
   messages: Message[]
   isLoading: boolean
-  festivalYear: number
   messagesEndRef: RefObject<HTMLDivElement | null>
 }
 
-export function ChatInterface({ messages, isLoading, festivalYear, messagesEndRef }: ChatInterfaceProps) {
+export function ChatInterface({ messages, isLoading, messagesEndRef }: ChatInterfaceProps) {
   if (messages.length === 0) {
     return (
       <div className="empty-state">
@@ -35,14 +34,12 @@ export function ChatInterface({ messages, isLoading, festivalYear, messagesEndRe
         <div key={message.id} className="animate-fade-in">
             <MessageBubble
               message={message}
-            festivalYear={festivalYear}
               showAvatar={index === 0 || messages[index - 1]?.role !== message.role}
             />
           
           {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-            <SourcesCard 
-              sources={message.sources} 
-              festivalYear={festivalYear}
+            <SourcesCard
+              sources={message.sources}
             />
           )}
         </div>

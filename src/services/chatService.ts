@@ -27,13 +27,44 @@ import {
 } from '../data/demoData'
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== 'false'
-const EDGE_FUNCTION_URL = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || '/functions/v1/chat'
+const CHAT_REQUEST_TIMEOUT_MS = 45_000
+
+/**
+ * Production hosting on Cloudflare Pages does not proxy `/functions/v1/*` to
+ * Supabase. Live mode therefore requires an explicit public Supabase endpoint
+ * (or a same-origin proxy deliberately configured by the host), never an
+ * implicit Pages-relative fallback.
+ */
+export function resolveChatEndpoint(config: ChatServiceConfig = {}): string {
+  const configured = config.edgeFunctionUrl ?? import.meta.env.VITE_CHAT_ENDPOINT ?? import.meta.env.VITE_SUPABASE_FUNCTIONS_URL
+  if (configured) return configured.replace(/\/$/, '')
+
+  const supabaseUrl = config.supabaseUrl ?? import.meta.env.VITE_SUPABASE_URL
+  if (supabaseUrl) return `${supabaseUrl.replace(/\/$/, '')}/functions/v1/chat`
+
+  throw new ChatConfigurationError('Live chat is not configured. Set VITE_CHAT_ENDPOINT or VITE_SUPABASE_URL before publishing.')
+}
+
+export class ChatConfigurationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ChatConfigurationError'
+  }
+}
+
+export class ChatTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Chat request timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`)
+    this.name = 'ChatTimeoutError'
+  }
+}
 
 export interface ChatServiceConfig {
   demoMode?: boolean
   edgeFunctionUrl?: string
   supabaseUrl?: string
   supabasePublishableKey?: string
+  requestTimeoutMs?: number
 }
 
 export interface ChatRequest {
@@ -459,17 +490,28 @@ class ChatService {
   // ===========================================================================
 
   private async sendMessageLive(request: ChatRequest): Promise<ChatResponse> {
-    const url = this.config.edgeFunctionUrl || EDGE_FUNCTION_URL
-    const publishableKey = this.config.supabasePublishableKey ?? import.meta.env.SUPABASE_PUBLISHABLE_KEY
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(publishableKey && { apikey: publishableKey }),
-      },
-      body: JSON.stringify(request),
-    })
+    const url = resolveChatEndpoint(this.config)
+    const publishableKey = this.config.supabasePublishableKey ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.SUPABASE_PUBLISHABLE_KEY
+    const controller = new AbortController()
+    const timeoutMs = this.config.requestTimeoutMs ?? CHAT_REQUEST_TIMEOUT_MS
+    const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(publishableKey && { apikey: publishableKey }),
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (controller.signal.aborted) throw new ChatTimeoutError(timeoutMs)
+      throw error
+    } finally {
+      globalThis.clearTimeout(timeout)
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Unknown error' }))

@@ -174,6 +174,7 @@ const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS')!)
 const secretKey = secretKeys['default']
 
 const PH_TIMEZONE = 'Asia/Manila'
+const CHAT_EXECUTION_TIMEOUT_MS = 40_000
 
 // Context-size caps. These bound what we send to Gemini so we never blow
 // past the model context window or drown the prompt with low-signal results.
@@ -719,6 +720,16 @@ function classifyChatError(error: unknown): { category: string; code: string } {
   return { category: 'internal_error', code: 'unclassified_runtime_error' }
 }
 
+function responseWithTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: number | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Chat execution timeout after ${timeoutMs}ms`)), timeoutMs)
+  })
+  return Promise.race([operation, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
+
 // ============================================
 // Prompt Formatting
 // ============================================
@@ -993,7 +1004,10 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     let result
     try {
       const primary = geminiAdapter(GEMINI_MODEL, async (requestPrompt) => (await model.generateContent(requestPrompt)).response.text())
-      const generated = await generateWithFailover({ prompt }, primary, configuredSecondaryAdapter(), (text) => text)
+      const generated = await responseWithTimeout(
+        generateWithFailover({ prompt }, primary, configuredSecondaryAdapter(), (text) => text),
+        CHAT_EXECUTION_TIMEOUT_MS,
+      )
       result = { response: { text: () => generated.value } }
       if (diagnostic) diagnostic.generation = { succeeded: true, generationAttempts: generated.metadata.attempts, generationRetries: generated.metadata.retries, generationRecoveredAfterRetry: generated.metadata.attempts > 1, generationFailureSequence: generated.metadata.failures.concat('success'), provider: generated.metadata.provider }
     } catch (error) {
@@ -1044,8 +1058,9 @@ ${buildInclusiveDateArithmeticGuidance(language)}
         requestId,
         ...(diagnostic ? { diagnostics: diagnostic } : {}),
       }
+    const isTimeout = classification.code === 'provider_transport' && /timeout/i.test(error instanceof Error ? error.message : String(error))
     return new Response(JSON.stringify(body),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: isTimeout ? 504 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })
