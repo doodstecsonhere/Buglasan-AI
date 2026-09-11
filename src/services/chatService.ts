@@ -59,6 +59,13 @@ export class ChatTimeoutError extends Error {
   }
 }
 
+export class ChatRequestAbortedError extends Error {
+  constructor() {
+    super('Chat request was cancelled.')
+    this.name = 'ChatRequestAbortedError'
+  }
+}
+
 export interface ChatServiceConfig {
   demoMode?: boolean
   edgeFunctionUrl?: string
@@ -77,6 +84,7 @@ export interface ChatRequest {
     timestamp: string
     sources?: SourceCitation[]
   }>
+  signal?: AbortSignal
 }
 
 /**
@@ -493,6 +501,8 @@ class ChatService {
     const url = resolveChatEndpoint(this.config)
     const publishableKey = this.config.supabasePublishableKey ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.SUPABASE_PUBLISHABLE_KEY
     const controller = new AbortController()
+    const abortFromCaller = () => controller.abort()
+    request.signal?.addEventListener('abort', abortFromCaller, { once: true })
     const timeoutMs = this.config.requestTimeoutMs ?? CHAT_REQUEST_TIMEOUT_MS
     const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
     let response: Response
@@ -507,10 +517,12 @@ class ChatService {
         signal: controller.signal,
       })
     } catch (error) {
+      if (request.signal?.aborted) throw new ChatRequestAbortedError()
       if (controller.signal.aborted) throw new ChatTimeoutError(timeoutMs)
       throw error
     } finally {
       globalThis.clearTimeout(timeout)
+      request.signal?.removeEventListener('abort', abortFromCaller)
     }
 
     if (!response.ok) {

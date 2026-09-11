@@ -1,5 +1,6 @@
 import type { SourceCitation } from '../types'
 import { formatPHDate } from '../utils/dateUtils'
+import { trustedSourceUrl } from '../utils/chatThreads'
 
 interface SourcesCardProps {
   sources: SourceCitation[]
@@ -22,19 +23,22 @@ export function SourcesCard({ sources }: SourcesCardProps) {
         </summary>
         
         <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-          {sources.map((source, index) => (
+          {sources.map((source, index) => {
+            const postUrl = trustedSourceUrl(source)
+            if (!postUrl) return null
+            return (
             <div key={source.id} className="space-y-1.5 last:pb-0">
               <div className="flex items-start gap-2">
                 <span className="flex-shrink-0 w-5 h-5 text-xs text-neutral-400 font-mono">{index + 1}.</span>
                 <div className="flex-1 min-w-0">
                   <a
-                    href={source.postUrl}
+                    href={postUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block break-words text-sm font-semibold text-fiesta-red underline-offset-2 hover:text-fiesta-red-dark hover:underline"
                     aria-label={`Open source: ${source.title}`}
                   >
-                    {source.title}
+                    Source {index + 1}: {source.title}
                   </a>
                   
                   <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-neutral-500">
@@ -59,7 +63,7 @@ export function SourcesCard({ sources }: SourcesCardProps) {
               </div>
               
               <a
-                href={source.postUrl}
+                href={postUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs text-fiesta-blue hover:text-fiesta-blue-dark underline-offset-2 hover:underline"
@@ -67,10 +71,11 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
-                View official post
+                Open Source {index + 1}
               </a>
             </div>
-          ))}
+            )
+          })}
         </div>
       </details>
     </div>

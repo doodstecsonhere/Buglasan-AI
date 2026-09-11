@@ -27,6 +27,7 @@ import {
   mapValidatedClaimCitations,
   resolveLanguage,
   shouldUseZeroEvidenceFallback,
+  isValidCitationSource,
   type SupportedLanguage,
 } from './grounding.ts'
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
@@ -820,6 +821,39 @@ function extractCitations(response: string, sources: Source[]): { citations: Sou
   return { citations, claims: mapped.claims }
 }
 
+/**
+ * Generation is best-effort, but evidence provenance is not. If a provider
+ * omits markers, deterministically attach the trusted evidence that was sent
+ * to it and append matching inline markers. This prevents a valid answer from
+ * rendering uncited while preserving the source ordering used in the prompt.
+ */
+function ensureTrustedCitations(response: string, sources: Source[]): { responseText: string; citations: SourceCitation[]; claims: ReturnType<typeof mapValidatedClaimCitations>['claims'] } {
+  const mapped = extractCitations(response, sources)
+  if (mapped.citations.length > 0) return { responseText: response, citations: mapped.citations, claims: mapped.claims }
+
+  const trusted = sources.filter(isValidCitationSource)
+  if (trusted.length === 0) return { responseText: response, citations: [], claims: [] }
+
+  const citations = trusted.map((source) => ({
+    id: source.id,
+    postId: source.post_id,
+    title: (source.normalized_text ?? source.raw_text ?? 'Official Buglasan source').replace(/\s+/g, ' ').trim().substring(0, 100) || 'Official Buglasan source',
+    platform: source.platform,
+    postUrl: source.post_url,
+    publishedAt: source.published_at,
+    festivalYear: source.festival_year,
+    isCurrent: source.is_current,
+    status: source.status,
+    supersedesSourceId: source.supersedes_source_id,
+  }))
+  const markers = trusted.map((source, index) => `[Source ${index + 1}] _(src: ${source.id})_`).join('\n')
+  return {
+    responseText: `${response.trim()}\n\n**Sources**\n${markers}`,
+    citations,
+    claims: trusted.map((source, claimIndex) => ({ claimIndex, sourceId: source.id, marker: `[Source ${claimIndex + 1}]` })),
+  }
+}
+
 function detectCorrectionQuery(query: string): boolean {
   return /\b(was\s+(?:this|it|that)\s+(?:changed|updated|corrected)|superseded|previous\s+(?:version|announcement)|what\s+changed|correction|updated\s+(?:from|version))\b/i.test(
     query
@@ -1022,9 +1056,8 @@ ${buildInclusiveDateArithmeticGuidance(language)}
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    const responseText = result.response.text()
-
-    const { citations, claims } = extractCitations(responseText, evidence.sources)
+    const generatedText = result.response.text()
+    const { responseText, citations, claims } = ensureTrustedCitations(generatedText, evidence.sources)
 
     const response: ChatResponse = {
       message: {

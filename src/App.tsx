@@ -5,8 +5,8 @@ import { ChatHistoryDrawer } from './components/ChatHistoryDrawer'
 import { AIDisclaimer } from './components/AIDisclaimer'
 import type { Message } from './types'
 import { getCurrentFestivalYear } from './utils/dateUtils'
-import { chatService } from './services'
-import { createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, updateChatThreadMessages, type ChatThread } from './utils/chatThreads'
+import { ChatRequestAbortedError, chatService } from './services'
+import { addressedThreadId, createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, updateChatThreadMessages, type ChatThread } from './utils/chatThreads'
 import { readInstallDismissed, writeInstallDismissed } from './utils/installPrompt'
 
 type ChatLanguage = 'en' | 'ceb' | 'fil'
@@ -14,9 +14,15 @@ interface BeforeInstallPromptEvent extends Event { prompt: () => Promise<void>; 
 
 function App() {
   const festivalYear = getCurrentFestivalYear()
-  const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads())
-  const [activeThreadId, setActiveThreadId] = useState(() => loadChatThreads()[0]?.id ?? '')
-  const [messages, setMessages] = useState<Message[]>(() => loadChatThreads()[0]?.messages ?? [])
+  const [initialState] = useState(() => {
+    const threads = loadChatThreads()
+    const addressedId = addressedThreadId()
+    const addressedThread = addressedId ? threads.find(thread => thread.id === addressedId) : undefined
+    return { threads, activeThreadId: addressedThread?.id ?? '', messages: addressedThread?.messages ?? [] }
+  })
+  const [threads, setThreads] = useState<ChatThread[]>(initialState.threads)
+  const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
+  const [messages, setMessages] = useState<Message[]>(initialState.messages)
   const [isLoading, setIsLoading] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [chatLanguage] = useState<ChatLanguage>(getPreferredChatLanguage)
@@ -27,6 +33,7 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const activeThreadRef = useRef(activeThreadId)
+  const requestControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => { saveChatThreads(threads) }, [threads])
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages])
@@ -66,19 +73,22 @@ function App() {
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), timestamp: new Date() }
     const history = [...messages, userMessage]
     const originThreadId = persistMessages(history, activeThreadId)
+    const requestController = new AbortController()
+    requestControllerRef.current = requestController
     setIsLoading(true)
     try {
-      const response = await chatService.sendMessage({ message: content, festivalYear, language: chatLanguage, conversationHistory: messages.slice(-6).map(m => ({ ...m, timestamp: m.timestamp.toISOString() })) })
+      const response = await chatService.sendMessage({ message: content, festivalYear, language: chatLanguage, conversationHistory: messages.slice(-6).map(m => ({ ...m, timestamp: m.timestamp.toISOString() })), signal: requestController.signal })
       persistMessages([...history, { id: response.message.id, role: 'assistant', content: response.message.content, timestamp: new Date(response.message.timestamp), sources: response.message.sources, festivalYear: response.message.festivalYear, claimCitations: response.message.claimCitations }], originThreadId, false)
     } catch (error) {
       console.error('Chat error:', error)
+      if (error instanceof ChatRequestAbortedError) return
       setErrorMessage(error instanceof Error && error.name === 'ChatTimeoutError'
         ? 'The answer took too long. No retry was sent automatically; please try once more.'
         : 'We could not get an answer. Check your connection and try again.')
-    } finally { setIsLoading(false) }
+    } finally { if (requestControllerRef.current === requestController) requestControllerRef.current = null; setIsLoading(false) }
   }, [activeThreadId, chatLanguage, festivalYear, isLoading, isOnline, messages, persistMessages])
 
-  const newChat = useCallback(() => { activeThreadRef.current = ''; setActiveThreadId(''); setMessages([]); setErrorMessage(null); setHistoryOpen(false); window.setTimeout(() => composerRef.current?.focus(), 0) }, [])
+  const newChat = useCallback(() => { requestControllerRef.current?.abort(); activeThreadRef.current = ''; setActiveThreadId(''); setMessages([]); setErrorMessage(null); setHistoryOpen(false); window.setTimeout(() => composerRef.current?.focus(), 0) }, [])
   const selectThread = useCallback((id: string) => { const thread = threads.find(item => item.id === id); if (thread) { activeThreadRef.current = id; setActiveThreadId(id); setMessages(thread.messages); setHistoryOpen(false) } }, [threads])
   const deleteThread = useCallback((id: string) => { setThreads(previous => previous.filter(thread => thread.id !== id)); if (id === activeThreadId) newChat() }, [activeThreadId, newChat])
   const installApp = async () => { if (!installPrompt) return; await installPrompt.prompt(); const result = await installPrompt.userChoice; if (result.outcome === 'dismissed') { writeInstallDismissed(); setInstallDismissed(true) }; setInstallPrompt(null) }

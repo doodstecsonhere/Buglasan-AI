@@ -20,6 +20,20 @@ export interface ValidatedClaimCitation {
   marker: string
 }
 
+export function isExactOfficialFacebookPostUrl(value: unknown, postId: unknown): value is string {
+  if (typeof value !== 'string' || typeof postId !== 'string' || !postId.trim()) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' &&
+      url.hostname === 'www.facebook.com' &&
+      !url.port && !url.username && !url.password && !url.search && !url.hash &&
+      /^\/Buglasan\/posts\/(?:\d+|[^/]+\/\d+)\/$/.test(url.pathname) &&
+      url.pathname.endsWith(`/${postId}/`)
+  } catch {
+    return false
+  }
+}
+
 /**
  * A citation is a public payload, not merely an internal retrieval reference.
  * Do not attach malformed or non-linkable records just because a model emitted
@@ -35,7 +49,9 @@ export function isValidCitationSource(source: unknown): source is GroundingSourc
   if (typeof record.festival_year !== 'number' || !Number.isInteger(record.festival_year)) return false
   try {
     const url = new URL(record.post_url)
-    return url.protocol === 'https:' || url.protocol === 'http:'
+    return record.platform === 'facebook'
+      ? isExactOfficialFacebookPostUrl(record.post_url, record.post_id)
+      : url.protocol === 'https:'
   } catch {
     return false
   }

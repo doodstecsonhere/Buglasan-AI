@@ -1,4 +1,4 @@
-import type { Message } from '../types'
+import type { Message, SourceCitation } from '../types'
 
 export const CHAT_THREADS_STORAGE_KEY = 'buglasan-ai.chat-threads.v1'
 
@@ -10,36 +10,99 @@ export interface ChatThread {
   messages: Message[]
 }
 
-type StoredThread = Omit<ChatThread, 'messages'> & { messages: Array<Omit<Message, 'timestamp'> & { timestamp: string }> }
+type StoredMessage = Omit<Message, 'timestamp' | 'sources'> & { timestamp: string; sources?: unknown }
+type StoredThread = Omit<ChatThread, 'messages'> & { messages: StoredMessage[] }
 
-function hydrateThread(thread: StoredThread): ChatThread {
-  return {
-    ...thread,
-    messages: thread.messages
-      .map(message => ({ ...message, timestamp: new Date(message.timestamp) }))
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+const VALID_PLATFORMS = new Set(['facebook', 'instagram', 'website', 'pdf', 'news', 'official'])
+const VALID_SOURCE_STATUSES = new Set(['active', 'updated', 'superseded', 'cancelled', 'postponed', 'archived'])
+const DEMO_FIXTURE_PATTERN = /\[DEMO FIXTURE\]|demo_(?:current|previous|historical|history)_|derived from demo sources|demo fixtures only/i
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === 'string' && !Number.isNaN(new Date(value).getTime())
+}
+
+/** Citations are only accepted when the persisted structured source URL is HTTPS. */
+export function trustedSourceUrl(source: Pick<SourceCitation, 'postUrl'>): string | null {
+  try {
+    const url = new URL(source.postUrl)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : null
+  } catch {
+    return null
   }
 }
 
+export function sanitizeSourceCitation(value: unknown): SourceCitation | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  if (typeof source.id !== 'string' || !source.id.trim() || typeof source.title !== 'string' || !source.title.trim() ||
+    typeof source.postId !== 'string' || !source.postId.trim() || typeof source.platform !== 'string' || !VALID_PLATFORMS.has(source.platform) ||
+    typeof source.status !== 'string' || !VALID_SOURCE_STATUSES.has(source.status) || !Number.isInteger(source.festivalYear) ||
+    (source.publishedAt !== null && !isIsoDate(source.publishedAt))) return null
+  const citation: SourceCitation = {
+    id: source.id, postId: source.postId, title: source.title, platform: source.platform as SourceCitation['platform'],
+    postUrl: typeof source.postUrl === 'string' ? source.postUrl : '', publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+    festivalYear: source.festivalYear as number, status: source.status as SourceCitation['status'],
+    ...(typeof source.supersedesSourceId === 'string' ? { supersedesSourceId: source.supersedesSourceId } : {}),
+  }
+  return trustedSourceUrl(citation) ? citation : null
+}
+
+function isStaleDemoFixture(thread: StoredThread): boolean {
+  return thread.messages.some((message) => DEMO_FIXTURE_PATTERN.test(message.content) ||
+    (Array.isArray(message.sources) && message.sources.some((source) => {
+      const candidate = source as Record<string, unknown>
+      return typeof candidate.id === 'string' && /^(?:src-(?:current|previous|historical)|demo-)/i.test(candidate.id)
+    })))
+}
+
+function hydrateMessage(message: StoredMessage): Message | null {
+  if (!message || typeof message.id !== 'string' || !message.id ||
+    !['user', 'assistant', 'system'].includes(message.role) || typeof message.content !== 'string' || !isIsoDate(message.timestamp)) return null
+  const sources = Array.isArray(message.sources) ? message.sources.map(sanitizeSourceCitation).filter((source): source is SourceCitation => source !== null) : undefined
+  const { sources: _storedSources, ...messageWithoutSources } = message
+  return { ...messageWithoutSources, timestamp: new Date(message.timestamp), ...(sources?.length ? { sources } : {}) }
+}
+
+function hydrateThread(thread: unknown): ChatThread | null {
+  if (!thread || typeof thread !== 'object') return null
+  const stored = thread as StoredThread
+  if (typeof stored.id !== 'string' || !stored.id || typeof stored.title !== 'string' || !isIsoDate(stored.createdAt) || !isIsoDate(stored.updatedAt) || !Array.isArray(stored.messages)) return null
+  if (isStaleDemoFixture(stored)) return null
+  const messages = stored.messages.map(hydrateMessage).filter((message): message is Message => message !== null).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  return { id: stored.id, title: stored.title, createdAt: stored.createdAt, updatedAt: stored.updatedAt, messages }
+}
+
+/** Hydrates legacy v1 history safely and rewrites it after removing only known demo fixtures. */
 export function loadChatThreads(): ChatThread[] {
   try {
     const raw = localStorage.getItem(CHAT_THREADS_STORAGE_KEY)
     if (!raw) return []
-    const parsed = JSON.parse(raw) as StoredThread[]
-    return parsed
-      .map(hydrateThread)
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const threads = parsed.map(hydrateThread).filter((thread): thread is ChatThread => thread !== null)
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    if (threads.length !== parsed.length) saveChatThreads(threads)
+    return threads
   } catch {
     return []
   }
 }
 
 export function saveChatThreads(threads: ChatThread[]) {
-  const serializable: StoredThread[] = threads.map(thread => ({
+  const serializable = threads.map(thread => ({
     ...thread,
-    messages: thread.messages.map(message => ({ ...message, timestamp: message.timestamp.toISOString() })),
+    messages: thread.messages.map(message => ({
+      ...message,
+      timestamp: message.timestamp.toISOString(),
+      ...(message.sources ? { sources: message.sources.map(source => ({ ...source, publishedAt: source.publishedAt?.toISOString() ?? null })) } : {}),
+    })),
   }))
   localStorage.setItem(CHAT_THREADS_STORAGE_KEY, JSON.stringify(serializable))
+}
+
+export function addressedThreadId(search = window.location.search): string | null {
+  const candidate = new URLSearchParams(search).get('thread')
+  return candidate?.trim() || null
 }
 
 export function titleFromMessages(messages: Message[]) {

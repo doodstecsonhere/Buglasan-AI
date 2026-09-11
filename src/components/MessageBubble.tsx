@@ -1,6 +1,7 @@
 import type { Message, SourceCitation } from '../types'
 import type { ReactNode } from 'react'
 import { formatRelativeTime } from '../utils/dateUtils'
+import { trustedSourceUrl } from '../utils/chatThreads'
 
 interface MessageBubbleProps {
   message: Message
@@ -59,7 +60,7 @@ export function renderCitedContent(content: string, sources: SourceCitation[]) {
     return (
       <a
         key={`${source.id}-${index}`}
-        href={source.postUrl}
+        href={trustedSourceUrl(source) ?? undefined}
         target="_blank"
         rel="noopener noreferrer"
         className="ml-1 inline-flex align-super text-xs font-semibold text-brand-blue underline-offset-2 hover:underline"

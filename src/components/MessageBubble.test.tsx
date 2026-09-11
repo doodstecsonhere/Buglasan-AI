@@ -6,7 +6,7 @@ import type { SourceCitation } from '../types'
 describe('MessageBubble response rendering', () => {
   const element = (value: unknown) => {
     expect(isValidElement(value)).toBe(true)
-    return value as ReactElement<{ children?: ReactElement<{ children?: string }> | string; href?: string }>
+    return value as ReactElement<{ children?: ReactElement<{ children?: string }> | string; href?: string; 'aria-label'?: string }>
   }
 
   it('renders generated Markdown emphasis without displaying its delimiters', () => {
@@ -23,9 +23,10 @@ describe('MessageBubble response rendering', () => {
   it('converts valid citation markers to mapped links while formatting adjacent Markdown', () => {
     const sources: SourceCitation[] = [{
       id: 'schedule-2026',
+      postId: '123456789',
       title: 'Official schedule',
       platform: 'facebook',
-      postUrl: 'https://example.com/schedule',
+      postUrl: 'https://www.facebook.com/Buglasan/posts/123456789/',
       publishedAt: new Date('2026-01-01T00:00:00.000Z'),
       festivalYear: 2026,
       status: 'active',
@@ -41,5 +42,28 @@ describe('MessageBubble response rendering', () => {
     expect(citationLink.type).toBe('a')
     expect(citationLink.props.href).toBe(sources[0].postUrl)
     expect(citationLink.props.children).toEqual(['[', 1, ']'])
+  })
+
+  it('renders no outbound link for a citation with a non-HTTPS source URL', () => {
+    const sources: SourceCitation[] = [{
+      id: 'unsafe-source', postId: '123456789', title: 'Unsafe source', platform: 'facebook',
+      postUrl: 'javascript:alert(1)', publishedAt: null, festivalYear: 2026, status: 'active',
+    }]
+
+    const rendered = renderCitedContent('[Source 1]', sources)
+    expect(element(rendered[0]).type).toBe('span')
+  })
+
+  it('renders an accessible Source N anchor for a valid non-Facebook canonical source URL', () => {
+    const sources: SourceCitation[] = [{
+      id: 'official-source', postId: 'official-1', title: 'Official festival page', platform: 'official',
+      postUrl: 'https://negor.gov.ph/buglasan', publishedAt: null, festivalYear: 2026, status: 'active',
+    }]
+
+    const rendered = renderCitedContent('See _(src: official-source)_', sources)
+    const citationLink = element(rendered[1])
+    expect(citationLink.type).toBe('a')
+    expect(citationLink.props.href).toBe('https://negor.gov.ph/buglasan')
+    expect(citationLink.props['aria-label']).toBe('Open source: Official festival page')
   })
 })

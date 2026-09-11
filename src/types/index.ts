@@ -145,6 +145,7 @@ export interface Message {
 
 export interface SourceCitation {
   id: string
+  postId?: string
   title: string
   platform: Platform
   postUrl: string

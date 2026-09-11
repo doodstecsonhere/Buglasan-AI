@@ -1,17 +1,33 @@
-import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts'
+const assertEquals = (actual: unknown, expected: unknown): void => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
+  }
+}
 import {
   buildInclusiveDateArithmeticGuidance,
   getLexicalEvidenceTerms,
   mapValidatedClaimCitations,
+  isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
   type GroundingSourceRecord,
 } from './grounding.ts'
 
+declare const Deno: {
+  test(name: string, fn: () => void): void
+}
+
 const source: GroundingSourceRecord = {
-  id: 'source-1', post_id: 'official-post-1', normalized_text: 'Pandanyag Festival - La Libertad', raw_text: null,
-  platform: 'facebook', post_url: 'https://www.facebook.com/Buglasan/posts/official-post-1/',
+  id: 'source-1', post_id: '123456789', normalized_text: 'Pandanyag Festival - La Libertad', raw_text: null,
+  platform: 'facebook', post_url: 'https://www.facebook.com/Buglasan/posts/123456789/',
   published_at: '2026-07-31T11:34:59+08:00', festival_year: 2026, is_current: true, status: 'active',
 }
+
+Deno.test('accepts only exact canonical official Facebook post URLs', () => {
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/', '123456789'), true)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/example/123456789/', '123456789'), true)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/?redirect=bad', '123456789'), false)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Other/posts/123456789/', '123456789'), false)
+})
 
 Deno.test('grounding: citation mapping keeps only valid, retrieved, linkable sources', () => {
   const malformed = { ...source, id: 'bad-source', post_url: 'not-a-url' }
