@@ -64,3 +64,4 @@ A later independently authorized change must either prove deployed reconciliatio
 - No provider call, candidate-bearing successful extraction, deployed v35 configuration proof, live extraction or canonical reconciliation test is claimed. The SQL authorization and recovery paths create no events in the isolated tests. This is not proof that the unchanged edge success path cannot reconcile.
 
 No existing live acceptance/cleanup harness may be used to validate this work: those ingest/delete fixtures.
+PHASE 11 FINAL ACCEPTANCE REQUIREMENT: Restore the visible header label from "BUGLASAN AI (DEMO)" to "BUGLASAN AI".
