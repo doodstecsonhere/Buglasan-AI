@@ -1,27 +1,20 @@
 @import "tailwindcss";
 
 @theme {
-  --color-fiesta-red: #E53E3E;
-  --color-fiesta-red-dark: #C53030;
-  --color-fiesta-red-light: #FC8181;
-  --color-fiesta-orange: #DD6B20;
-  --color-fiesta-orange-dark: #C05621;
-  --color-fiesta-orange-light: #FBD38D;
-  --color-fiesta-yellow: #D69E2E;
-  --color-fiesta-yellow-dark: #B7791F;
-  --color-fiesta-yellow-light: #FAF089;
-  --color-fiesta-green: #38A169;
-  --color-fiesta-green-dark: #2F855A;
-  --color-fiesta-green-light: #9AE6B4;
-  --color-fiesta-blue: #3182CE;
-  --color-fiesta-blue-dark: #2C5282;
-  --color-fiesta-blue-light: #90CDF4;
-  --color-fiesta-purple: #805AD5;
-  --color-fiesta-purple-dark: #6B46C1;
-  --color-fiesta-purple-light: #D6BCFA;
-  --color-fiesta-pink: #D53F8C;
-  --color-fiesta-pink-dark: #B83280;
-  --color-fiesta-pink-light: #FBB6CE;
+  --color-brand-navy: #07174f;
+  --color-brand-blue: #1769e0;
+  --color-brand-cyan: #08b9db;
+  --color-brand-green: #159447;
+  --color-brand-lime: #75c919;
+  --color-brand-yellow: #e5b51b;
+  --color-brand-orange: #e36b26;
+  --color-brand-violet: #7048d8;
+  --color-fiesta-red: #1769e0;
+  --color-fiesta-red-dark: #0f4fb5;
+  --color-fiesta-red-light: #b9dcff;
+  --color-fiesta-blue: #1769e0;
+  --color-fiesta-blue-dark: #0f4fb5;
+  --color-fiesta-yellow-light: #fff7d1;
 }
 
 @layer base {
@@ -31,11 +24,11 @@
   
   body {
     @apply bg-neutral-50 text-neutral-900 font-sans antialiased;
-    background-image: radial-gradient(circle at 12% 0%, rgba(229, 62, 62, .08), transparent 28rem), radial-gradient(circle at 100% 100%, rgba(214, 158, 46, .08), transparent 24rem);
+    background-image: radial-gradient(circle at 12% 0%, rgba(23, 105, 224, .08), transparent 28rem), radial-gradient(circle at 100% 100%, rgba(8, 185, 219, .08), transparent 24rem);
   }
 
-  :focus-visible { outline: 3px solid #E53E3E; outline-offset: 3px; }
-  ::selection { background: #fecaca; color: #450a0a; }
+  :focus-visible { outline: 3px solid #1769e0; outline-offset: 3px; }
+  ::selection { background: #b9dcff; color: #07174f; }
   
   html {
     @apply scroll-smooth;
@@ -47,28 +40,31 @@
 }
 
 @layer components {
-  .app-shell { min-height: 100dvh; background: linear-gradient(135deg, #fffaf7 0%, #f8fafc 48%, #fff 100%); }
+  .app-shell { min-height: 100dvh; background: linear-gradient(135deg, #f8fbff 0%, #f8fafc 48%, #fff 100%); }
   .app-header { @apply sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl sm:px-6; }
-  .brand-mark { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fiesta-red text-lg font-black text-white shadow-lg shadow-red-200; }
-  .brand-name { @apply text-[11px] font-black uppercase tracking-[.2em] text-fiesta-red; }
+  .brand-mark { @apply h-9 w-9 shrink-0 rounded-xl object-cover shadow-lg shadow-blue-200; }
+  .brand-name { @apply text-[11px] font-black uppercase tracking-[.2em] text-brand-blue; }
   .icon-button { @apply inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50; }
-  .install-button { @apply rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-fiesta-red transition hover:bg-red-100; }
+  .install-button { @apply rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-brand-blue transition hover:bg-blue-100; }
   .history-sidebar { @apply hidden w-72 shrink-0 border-r border-slate-200/80 bg-white/70 md:flex md:flex-col; }
   .history-heading { @apply flex items-center justify-between border-b border-slate-100 px-5 py-5; }
   .new-chat-button { @apply mx-4 my-4 rounded-xl bg-fiesta-red px-4 py-3 text-sm font-bold text-white shadow-lg shadow-red-200 transition hover:bg-fiesta-red-dark; }
   .thread-row { @apply mb-1 flex items-start gap-2 rounded-xl p-3 transition hover:bg-slate-50; }
-  .thread-row.active { @apply bg-red-50 ring-1 ring-red-100; }
+  .thread-row.active { @apply bg-blue-50 ring-1 ring-blue-100; }
   .delete-thread { @apply rounded-lg px-2 py-1 text-lg leading-none text-slate-300 transition hover:bg-red-50 hover:text-red-600; }
   .drawer-backdrop { @apply fixed inset-0 z-40 bg-slate-950/40 md:hidden; }
   .suggestions { @apply flex flex-wrap gap-2; }
-  .suggestion { @apply rounded-full border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-600 shadow-sm transition hover:border-red-300 hover:text-fiesta-red; }
+  .suggestion { @apply rounded-full border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-400 hover:text-brand-blue; }
   .composer-dock { @apply shrink-0 border-t border-slate-200/80 bg-white/90 px-4 py-3 backdrop-blur-xl sm:px-6; padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
   .composer-form { @apply flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 shadow-inner; }
   .composer-input { @apply max-h-36 min-h-[44px] flex-1 resize-y rounded-xl border-0 bg-transparent px-3 py-2.5 text-sm leading-6 outline-none placeholder:text-slate-400 focus:ring-0 disabled:opacity-50; }
-  .send-button { @apply h-11 w-11 shrink-0 rounded-xl bg-fiesta-red text-xl font-bold text-white shadow-md shadow-red-200 transition hover:bg-fiesta-red-dark disabled:cursor-not-allowed disabled:opacity-40; }
+  .send-button { @apply h-11 w-11 shrink-0 rounded-xl bg-brand-blue text-xl font-bold text-white shadow-md shadow-blue-200 transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-40; }
   .empty-state { @apply flex min-h-[55vh] flex-col items-center justify-center px-4 py-12 text-center; }
-  .empty-icon { @apply mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-100 text-2xl shadow-inner; }
-  .eyebrow { @apply mb-2 text-xs font-black uppercase tracking-[.18em] text-fiesta-red; }
+  .empty-icon { @apply mb-5 flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-brand-navy p-1 shadow-inner; }
+  .empty-icon img { @apply h-full w-full rounded-xl object-cover; }
+  .message-avatar { @apply h-8 w-8 shrink-0 rounded-full object-cover; }
+  .user-avatar { @apply flex items-center justify-center bg-brand-blue text-[10px] font-bold text-white; }
+  .eyebrow { @apply mb-2 text-xs font-black uppercase tracking-[.18em] text-brand-blue; }
 }
 
 @media (max-width: 767px) {
@@ -112,7 +108,7 @@
   }
 
   .skip-link {
-    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:font-semibold focus:text-fiesta-red focus:shadow-lg;
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:font-semibold focus:text-brand-blue focus:shadow-lg;
   }
   
   @keyframes fadeIn {

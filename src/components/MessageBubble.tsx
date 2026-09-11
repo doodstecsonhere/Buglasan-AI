@@ -14,9 +14,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && showAvatar && (
-        <div className="flex-shrink-0 w-8 h-8 bg-fiesta-red rounded-full flex items-center justify-center text-white text-xs font-bold">
-          🎭
-        </div>
+        <img className="message-avatar" src="/icons/icon-192.png" alt="Buglasan AI" />
       )}
       
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
@@ -24,7 +22,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
           className={`
             max-w-full break-words px-4 py-3 text-sm leading-7 whitespace-pre-wrap
             ${isUser
-              ? 'rounded-2xl rounded-br-md bg-fiesta-red text-white shadow-md shadow-red-100'
+              ? 'rounded-2xl rounded-br-md bg-brand-blue text-white shadow-md shadow-blue-100'
               : 'rounded-2xl rounded-bl-md border border-slate-200/80 bg-white text-neutral-900 shadow-sm'
             }
           `}
@@ -38,9 +36,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
       </div>
       
       {isUser && showAvatar && (
-        <div className="flex-shrink-0 w-8 h-8 bg-fiesta-blue rounded-full flex items-center justify-center text-white text-xs font-bold">
-          👤
-        </div>
+        <div className="message-avatar user-avatar" aria-hidden="true">You</div>
       )}
     </div>
   )
@@ -66,7 +62,7 @@ export function renderCitedContent(content: string, sources: SourceCitation[]) {
         href={source.postUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="ml-1 inline-flex align-super text-xs font-semibold text-fiesta-red underline-offset-2 hover:underline"
+        className="ml-1 inline-flex align-super text-xs font-semibold text-brand-blue underline-offset-2 hover:underline"
         aria-label={`Open source: ${source.title}`}
         title={source.title}
       >

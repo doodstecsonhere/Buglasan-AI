@@ -6,8 +6,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#FAFAFA",
-  "theme_color": "#E53E3E",
+  "background_color": "#07174F",
+  "theme_color": "#07174F",
   "orientation": "portrait",
   "icons": [
     {
@@ -27,6 +27,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "categories": ["festival", "events", "travel", "lifestyle"],

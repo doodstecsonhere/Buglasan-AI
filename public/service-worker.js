@@ -1,4 +1,4 @@
-const CACHE_NAME = 'buglasan-ai-shell-v3'
+const CACHE_NAME = 'buglasan-ai-shell-v4-branding'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -7,6 +7,7 @@ const APP_SHELL = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-512-maskable.png',
+  '/icons/apple-touch-icon.png',
 ]
 const APP_SHELL_PATHS = new Set(APP_SHELL)
 
