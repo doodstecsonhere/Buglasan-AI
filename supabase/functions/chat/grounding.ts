@@ -116,6 +116,26 @@ export function isGeneralConversation(query: string): boolean {
   return generalPatterns.some((pattern) => pattern.test(normalized))
 }
 
+/** Small, deterministic calculations are not festival claims and need no retrieval or provider call. */
+export function getDeterministicHarmlessResponse(query: string): string | undefined {
+  const normalized = query.toLowerCase()
+    .replace(/[?=]/g, ' ')
+    .replace(/^(what(?:'s|s|\s+is)|calculate|compute)\s+/i, '')
+    .replace(/\b(plus|minus|times|multiplied\s+by|divided\s+by)\b/g, (operator) => {
+      const operators: Record<string, string> = {
+        plus: '+', minus: '-', times: '*', 'multiplied by': '*', 'divided by': '/',
+      }
+      return ` ${operators[operator]} `
+    })
+    .trim()
+  const match = normalized.match(/^(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)$/)
+  if (!match) return undefined
+  const left = Number(match[1])
+  const right = Number(match[3])
+  const result = match[2] === '+' ? left + right : match[2] === '-' ? left - right : match[2] === '*' ? left * right : right === 0 ? undefined : left / right
+  return result === undefined || !Number.isFinite(result) ? 'I cannot divide by zero.' : String(result)
+}
+
 /**
  * Detect requests that could produce factual festival claims. This includes
  * festival names plus common fact-seeking vocabulary in supported languages.

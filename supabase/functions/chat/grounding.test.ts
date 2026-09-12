@@ -5,6 +5,7 @@ const assertEquals = (actual: unknown, expected: unknown): void => {
 }
 import {
   buildInclusiveDateArithmeticGuidance,
+  getDeterministicHarmlessResponse,
   getLexicalEvidenceTerms,
   mapValidatedClaimCitations,
   isExactOfficialFacebookPostUrl,
@@ -50,4 +51,10 @@ Deno.test('grounding: Filipino date arithmetic explicitly uses inclusive wording
 
 Deno.test('grounding: Pandanyag is retained as an exact-year lexical retrieval term', () => {
   assertEquals(getLexicalEvidenceTerms('Which LGU has the Pandanyag Festival in 2026?'), ['pandanyag'])
+})
+
+Deno.test('grounding: harmless arithmetic is deterministic and bypasses factual handling', () => {
+  assertEquals(getDeterministicHarmlessResponse('2 + 2'), '4')
+  assertEquals(getDeterministicHarmlessResponse('whats 2 plus 2'), '4')
+  assertEquals(getDeterministicHarmlessResponse('2 / 0'), 'I cannot divide by zero.')
 })
