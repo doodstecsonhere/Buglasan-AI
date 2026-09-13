@@ -24,7 +24,7 @@ describe('production service worker shell policy', () => {
   })
 
   it('uses versioned raster Buglasan icon assets', () => {
-    expect(workerSource).toContain("buglasan-ai-shell-v4-branding")
+    expect(workerSource).toContain("buglasan-ai-shell-v5-offline-knowledge")
     expect(workerSource).toContain('/icons/icon-192.png')
     expect(workerSource).toContain('/icons/icon-512-maskable.png')
     expect(workerSource).toContain('/icons/apple-touch-icon.png')

@@ -2,7 +2,9 @@ import type { ChatResponse, ChatRequest } from './chatService'
 import type { ChatLanguage, Event, FestivalYear, SourceCitation } from '../types'
 import { getCurrentDateInPH } from '../utils/dateUtils'
 
-const STORE_KEY = 'buglasan-ai.verified-knowledge.v1'
+const DATABASE_NAME = 'buglasan-ai-offline-knowledge'
+const STORE_NAME = 'verified-snapshots'
+const DATABASE_VERSION = 1
 const OFFICIAL_FACEBOOK = 'https://www.facebook.com/Buglasan'
 
 export interface VerifiedKnowledgeSnapshot {
@@ -19,8 +21,36 @@ function safeUrl(value: unknown): value is string {
   try { const url = new URL(String(value)); return url.protocol === 'https:' || url.protocol === 'http:' } catch { return false }
 }
 
-function storage(): Storage | null {
-  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
+function openDatabase(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null)
+  return new Promise(resolve => {
+    let request: IDBOpenDBRequest
+    try { request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION) } catch { resolve(null); return }
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'year' })
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => resolve(null)
+    request.onblocked = () => resolve(null)
+  })
+}
+
+async function replaceSnapshot(snapshot: VerifiedKnowledgeSnapshot): Promise<void> {
+  const database = await openDatabase()
+  if (!database) return
+  try {
+    await new Promise<void>((resolve, reject) => {
+      // A single read/write transaction commits the whole snapshot or preserves
+      // the previous complete record when validation, serialization, or storage fails.
+      const transaction = database.transaction(STORE_NAME, 'readwrite')
+      transaction.objectStore(STORE_NAME).put(snapshot)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+  } catch {
+    // The last known-good snapshot is deliberately retained on refresh failure.
+  } finally { database.close() }
 }
 
 export async function saveVerifiedKnowledge(response: ChatResponse): Promise<void> {
@@ -35,35 +65,36 @@ export async function saveVerifiedKnowledge(response: ChatResponse): Promise<voi
     sources: dedupe([...citations, ...sources]),
     updates: dedupe([...citations, ...sources]).slice(0, 8).map(source => ({ title: source.title, snippet: source.title, url: source.postUrl, publishedAt: source.publishedAt instanceof Date ? source.publishedAt.toISOString() : null })),
   }
-  // Atomic replacement: leave the prior complete snapshot intact when serialization fails.
-  const target = storage()
-  if (!target || (!snapshot.events.length && !snapshot.sources.length)) return
-  target.setItem(`${STORE_KEY}.${year}.next`, JSON.stringify(snapshot))
-  target.setItem(`${STORE_KEY}.${year}`, JSON.stringify(snapshot))
-  target.removeItem(`${STORE_KEY}.${year}.next`)
+  if (!snapshot.events.length && !snapshot.sources.length) return
+  await replaceSnapshot(snapshot)
 }
 
 function dedupe(sources: SourceCitation[]): SourceCitation[] {
   return [...new Map(sources.map(source => [source.id, source])).values()]
 }
 
-function load(year: FestivalYear): VerifiedKnowledgeSnapshot | null {
+async function load(year: FestivalYear): Promise<VerifiedKnowledgeSnapshot | null> {
+  const database = await openDatabase()
+  if (!database) return null
   try {
-    const raw = storage()?.getItem(`${STORE_KEY}.${year}`)
-    const snapshot: unknown = raw ? JSON.parse(raw) : null
+    const snapshot: unknown = await new Promise((resolve, reject) => {
+      const request = database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(year)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
     if (!snapshot || typeof snapshot !== 'object') return null
     const value = snapshot as VerifiedKnowledgeSnapshot
     return value.version === 1 && value.year === year && Array.isArray(value.events) && Array.isArray(value.sources) ? value : null
-  } catch { return null }
+  } catch { return null } finally { database.close() }
 }
 
 const words = (value: string) => value.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []
 const isAnnouncement = (value: string) => /\b(latest|current|new(?:est)?|recent)\s+(?:official\s+)?(?:update|announcement|advisory|notice)|\b(?:latest|current)\b.*\b(?:update|announcement|advisory|notice)\b/i.test(value)
 const dateWindow = (value: string) => /\b(today|tomorrow|tmrw|weekend|upcoming|coming\s+up|schedule|when|date)\b/i.test(value)
 
-export function answerOffline(request: ChatRequest, year: FestivalYear): ChatResponse {
+export async function answerOffline(request: ChatRequest, year: FestivalYear): Promise<ChatResponse> {
   const language = request.language ?? 'en'
-  const snapshot = load(year)
+  const snapshot = await load(year)
   const now = getCurrentDateInPH()
   const freshness = snapshot ? new Date(snapshot.savedAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }) : ''
   const suffix = snapshot ? `\n\n_${offlineFreshness(language, freshness)}_` : ''

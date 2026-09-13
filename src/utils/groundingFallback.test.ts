@@ -11,7 +11,7 @@ const emptyEvidence = { sources: [], events: [], chunks: [] }
 
 describe('zero-evidence grounding fallback', () => {
   it.each([
-    ['en', 'No current official information was found'],
+    ['en', 'No verified current official Buglasan Festival'],
     ['ceb', 'Walay nakaplagang kasamtangang opisyal nga impormasyon'],
     ['fil', 'Walang nakitang kasalukuyang opisyal na impormasyon'],
   ] satisfies Array<[SupportedLanguage, string]>)('returns deterministic %s guidance with the resolved year', (language, opening) => {

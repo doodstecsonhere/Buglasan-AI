@@ -227,7 +227,7 @@ class ChatService {
 
     // Test/demo fixtures intentionally run without a network navigator; offline
     // product routing applies only to the live production client.
-    if (!DEMO_MODE && typeof navigator !== 'undefined' && navigator.onLine === false) return answerOffline(request, festivalYear)
+    if (!DEMO_MODE && typeof navigator !== 'undefined' && navigator.onLine === false) return await answerOffline(request, festivalYear)
 
     if (DEMO_MODE && this.demoMode) {
       return this.sendMessageDemo(request, festivalYear)

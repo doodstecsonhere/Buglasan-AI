@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import 'fake-indexeddb/auto'
 import { answerOffline, saveVerifiedKnowledge } from './offlineKnowledge'
 import type { ChatResponse } from './chatService'
 
@@ -8,22 +9,26 @@ const response: ChatResponse = {
 }
 
 describe('offline verified knowledge', () => {
-  const memory = new Map<string, string>()
   beforeEach(() => {
-    memory.clear()
-    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: (key: string) => memory.get(key) ?? null, setItem: (key: string, value: string) => memory.set(key, value), removeItem: (key: string) => memory.delete(key), clear: () => memory.clear() } })
+    indexedDB.deleteDatabase('buglasan-ai-offline-knowledge')
   })
 
   it('answers a cached latest update with a source URL and localized freshness', async () => {
     await saveVerifiedKnowledge(response)
-    const result = answerOffline({ message: "What's the latest update?", language: 'en' }, 2026)
+    const result = await answerOffline({ message: "What's the latest update?", language: 'en' }, 2026)
     expect(result.message.content).toContain('https://www.facebook.com/Buglasan/posts/1/')
     expect(result.message.content).toContain('Offline cache saved')
   })
 
   it('distinguishes zero cache and unavailable cached queries', async () => {
-    expect(answerOffline({ message: 'today', language: 'en' }, 2026).message.content).toContain('no verified Buglasan information is cached')
+    expect((await answerOffline({ message: 'today', language: 'en' }, 2026)).message.content).toContain('no verified Buglasan information is cached')
     await saveVerifiedKnowledge(response)
-    expect(answerOffline({ message: 'venue for imaginary item', language: 'ceb' }, 2026).message.content).toContain('Dili matubag')
+    expect((await answerOffline({ message: 'venue for imaginary item', language: 'ceb' }, 2026)).message.content).toContain('Dili matubag')
+  })
+
+  it('isolates snapshots by festival year', async () => {
+    await saveVerifiedKnowledge(response)
+    expect((await answerOffline({ message: "What's the latest update?", language: 'en' }, 2027)).message.content).toContain('no verified Buglasan information is cached')
+    expect((await answerOffline({ message: "What's the latest update?", language: 'en' }, 2026)).message.content).toContain('https://www.facebook.com/Buglasan/posts/1/')
   })
 })
