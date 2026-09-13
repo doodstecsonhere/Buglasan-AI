@@ -191,7 +191,10 @@ export function isFutureDiscoveryQuery(query: string): boolean {
 export function isFestivalInformationQuery(query: string): boolean {
   if (isGeneralConversation(query)) return false
 
-  return /\b(buglasan|festival|schedule|lineup|event|activity|date|time|when|where|venue|location|organizer|history|origin|tradition|announcement|registration|register|deadline|parade|competition|food\s+fair|opening|closing|iskedyul|kalihokan|petsa|oras|kanus-a|asa|lugar|tig-organisa|kasaysayan|tradisyon|pahibalo|rehistro|kaganapan|kailan|saan|tagapag-organisa|anunsyo|pagpaparehistro)\b/i.test(query)
+  // A request for the "latest update" is a factual festival request, even
+  // though it does not necessarily contain a schedule/event keyword. Keep it
+  // on the grounded route rather than allowing the scope guard to answer it.
+  return /\b(buglasan|festival|schedule|lineup|event|activity|date|time|when|where|venue|location|organizer|history|origin|tradition|announcement|update|latest|registration|register|deadline|parade|competition|food\s+fair|opening|closing|iskedyul|kalihokan|petsa|oras|kanus-a|asa|lugar|tig-organisa|kasaysayan|tradisyon|pahibalo|rehistro|kaganapan|kailan|saan|tagapag-organisa|anunsyo|pagpaparehistro)\b/i.test(query)
 }
 
 export function hasUsableEvidence(evidence: EvidencePresence): boolean {
@@ -213,7 +216,7 @@ export function shouldUseZeroEvidenceFallback(query: string, evidence: EvidenceP
  */
 export function buildZeroEvidenceFallback(year: number, language: SupportedLanguage): string {
   const messages: Record<SupportedLanguage, string> = {
-    en: `No current official information was found for Buglasan Festival ${year}. Please check the official Buglasan Festival Facebook Page for verified updates: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    en: `No verified current official Buglasan Festival ${year} information matches this request. Please check the official Buglasan Festival Facebook Page for verified updates: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
     ceb: `Walay nakaplagang kasamtangang opisyal nga impormasyon alang sa Buglasan Festival ${year}. Palihog tan-awa ang opisyal nga Buglasan Festival Facebook Page alang sa beripikadong mga update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
     fil: `Walang nakitang kasalukuyang opisyal na impormasyon para sa Buglasan Festival ${year}. Pakitingnan ang opisyal na Buglasan Festival Facebook Page para sa mga beripikadong update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
   }
@@ -235,6 +238,17 @@ export function buildTemporaryServiceError(language: SupportedLanguage): string 
     ceb: 'Temporaryong dili magamit ang Buglasan AI. Palihog sulayi pag-usab sa dili madugay.',
     fil: 'Pansamantalang hindi available ang Buglasan AI. Pakisubukang muli sa ilang sandali.',
   }[language]
+}
+
+/**
+ * Infrastructure and provider-content failures are distinct from an honest
+ * no-evidence result. Preserve a grounded route when retrieval already found
+ * query-relevant evidence; otherwise return a visible, recoverable DTO body.
+ */
+export function buildRecoverableFailureFallback(evidence: EvidencePresence, language: SupportedLanguage): string {
+  return hasUsableEvidence(evidence)
+    ? buildGroundedGenerationFallback(language)
+    : buildTemporaryServiceError(language)
 }
 
 /** Use only when generation failed after trusted, query-relevant evidence was retrieved. */

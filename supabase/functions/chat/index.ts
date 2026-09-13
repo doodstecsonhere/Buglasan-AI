@@ -23,6 +23,7 @@ import {
   buildZeroEvidenceFallback,
   buildNoVerifiedEventListingFallback,
   buildGroundedGenerationFallback,
+  buildRecoverableFailureFallback,
   buildTemporaryServiceError,
   buildInclusiveDateArithmeticGuidance,
   getLexicalEvidenceTerms,
@@ -994,11 +995,13 @@ serve(async (req) => {
     // retrieval produced no usable official evidence. General conversation
     // remains model-handled even without evidence.
     if (!diagnostic && evidence.retrievalFailed) {
+      const hasEvidence = hasUsableEvidence(evidence)
+      const fallback = ensureTrustedCitations(buildRecoverableFailureFallback(evidence, language), evidence.sources)
       const response: ChatResponse = {
-        message: { id: crypto.randomUUID(), role: 'assistant', content: buildTemporaryServiceError(language), timestamp: new Date().toISOString(), sources: [], festivalYear: resolvedYear },
-        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolvedYear, language,
+        message: { id: crypto.randomUUID(), role: 'assistant', content: fallback.responseText, timestamp: new Date().toISOString(), sources: fallback.citations, claimCitations: fallback.claims, festivalYear: resolvedYear },
+        retrievedSources: evidence.sources, retrievedEvents: evidence.events, retrievedChunks: evidence.chunks, yearResolved: resolvedYear, language,
       }
-      return new Response(JSON.stringify(response), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify(response), { status: hasEvidence ? 200 : 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     if (!diagnostic && isEventWindowQuery(message) && evidence.events.length === 0) {
@@ -1129,9 +1132,13 @@ ${buildInclusiveDateArithmeticGuidance(language)}
       })
     }
     const providerText = result.response.text()
-    const generatedText = typeof providerText === 'string' && providerText.trim()
+    // A successful transport response can still contain no usable content.
+    // Treat that as a provider-content failure, not zero evidence: preserve
+    // trusted evidence when available and do not issue another provider call.
+    const hasProviderText = typeof providerText === 'string' && providerText.trim()
+    const generatedText = hasProviderText
       ? providerText.trim()
-      : buildTemporaryServiceError(language)
+      : buildRecoverableFailureFallback(evidence, language)
     const { responseText, citations, claims } = ensureTrustedCitations(generatedText, evidence.sources)
 
     const response: ChatResponse = {

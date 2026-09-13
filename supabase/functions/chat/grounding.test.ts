@@ -6,6 +6,8 @@ const assertEquals = (actual: unknown, expected: unknown): void => {
 import {
   buildInclusiveDateArithmeticGuidance,
   buildNoVerifiedEventListingFallback,
+  buildRecoverableFailureFallback,
+  buildZeroEvidenceFallback,
   buildGroundedGenerationFallback,
   buildTemporaryServiceError,
   getDeterministicHarmlessResponse,
@@ -13,6 +15,7 @@ import {
   getOutOfScopeResponse,
   getLexicalEvidenceTerms,
   isFutureDiscoveryQuery,
+  isFestivalInformationQuery,
   isTemporalOnlyQuery,
   isEventWindowQuery,
   mapValidatedClaimCitations,
@@ -72,6 +75,16 @@ Deno.test('grounding: standalone tomorrow is temporal-only and broad discovery i
   assertEquals(isFutureDiscoveryQuery('Anything interesting coming up?'), true)
 })
 
+Deno.test('grounding: production acceptance temporal and latest prompts remain grounded and use request-specific 2026 fallbacks', () => {
+  for (const query of ['What are the Buglasan events for today?', 'What are the Buglasan events tomorrow?', "What's the latest update?"]) {
+    assertEquals(isFestivalInformationQuery(query), true)
+  }
+  assertEquals(buildNoVerifiedEventListingFallback(2026, 'en').includes('No verified Buglasan Festival 2026 event listing'), true)
+  const latestFallback = buildZeroEvidenceFallback(2026, 'en')
+  assertEquals(latestFallback.includes('No verified current official Buglasan Festival 2026 information matches this request'), true)
+  assertEquals(latestFallback.includes('https://www.facebook.com/Buglasan'), true)
+})
+
 Deno.test('grounding: greetings and unrelated questions bypass retrieval with deterministic responses', () => {
   assertEquals(getLightweightConversationResponse('Hello!', 'en')?.includes('verified Buglasan Festival'), true)
   assertEquals(getLightweightConversationResponse('What can you do?', 'en')?.includes('schedules'), true)
@@ -84,4 +97,13 @@ Deno.test('grounding: temporal event windows require event evidence rather than 
   assertEquals(buildTemporaryServiceError('en').includes('temporarily unavailable'), true)
   assertEquals(isEventWindowQuery('When is Buglasan Festival 2026?'), true)
   assertEquals(buildGroundedGenerationFallback('en').includes('relevant official Buglasan information'), true)
+})
+
+Deno.test('grounding: isolated failure simulation keeps evidence failures grounded and zero-evidence failures visible', () => {
+  const withEvidence = { sources: [source], chunks: [], events: [] }
+  const withoutEvidence = { sources: [], chunks: [], events: [] }
+  // This pure dependency seam safely covers retrieval and malformed/empty
+  // provider content without an unauthenticated production failure switch.
+  assertEquals(buildRecoverableFailureFallback(withEvidence, 'en'), buildGroundedGenerationFallback('en'))
+  assertEquals(buildRecoverableFailureFallback(withoutEvidence, 'en'), buildTemporaryServiceError('en'))
 })

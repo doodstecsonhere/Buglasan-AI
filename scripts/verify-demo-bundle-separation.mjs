@@ -7,6 +7,7 @@ const outputRoot = '.tmp-demo-bundle-verification'
 const liveOutput = join(outputRoot, 'live')
 const demoOutput = join(outputRoot, 'demo')
 const prohibitedLiveMarkers = [
+  'BUGLASAN AI (DEMO)',
   '[DEMO FIXTURE]',
   'demo_current_schedule_001',
   'Demo Dish A',
