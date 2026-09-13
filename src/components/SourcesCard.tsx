@@ -7,7 +7,8 @@ interface SourcesCardProps {
 }
 
 export function SourcesCard({ sources }: SourcesCardProps) {
-  if (!sources || sources.length === 0) return null
+  const safeSources = Array.isArray(sources) ? sources.filter((source): source is SourceCitation => !!source && typeof source === 'object' && typeof source.id === 'string' && typeof source.title === 'string') : []
+  if (safeSources.length === 0) return null
 
   return (
     <div className="mt-3 animate-slide-up max-w-2xl">
@@ -16,14 +17,14 @@ export function SourcesCard({ sources }: SourcesCardProps) {
           <svg className="w-4 h-4 text-fiesta-red flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <span>Evidence · {sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
+          <span>Evidence · {safeSources.length} {safeSources.length === 1 ? 'source' : 'sources'}</span>
           <svg className="w-4 h-4 text-neutral-400 ml-auto transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </summary>
         
         <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-          {sources.map((source, index) => {
+          {safeSources.map((source, index) => {
             const postUrl = trustedSourceUrl(source)
             if (!postUrl) return null
             return (
@@ -47,7 +48,7 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                         {source.platform}
                       </span>
                     </span>
-                    <span>{source.publishedAt ? formatPHDate(source.publishedAt, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Publication date unknown'}</span>
+                    <span>{source.publishedAt instanceof Date && !Number.isNaN(source.publishedAt.getTime()) ? formatPHDate(source.publishedAt, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Publication date unknown'}</span>
                     {(['active','updated','postponed'].includes(source.status)) && (
                       <span className="px-1.5 py-0.5 bg-fiesta-green-light text-fiesta-green-dark rounded text-[10px] font-medium">
                         Current

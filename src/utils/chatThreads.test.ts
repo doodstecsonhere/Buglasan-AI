@@ -57,15 +57,18 @@ describe('chat thread persistence helpers', () => {
     expect(loadChatThreads()[0].messages[0].sources).toEqual([source])
   })
 
-  it('migrates only known stale demo-fixture history while retaining legitimate legacy history', () => {
+  it('removes only stale demo messages while retaining legitimate legacy conversations', () => {
     const base = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' }
     localStorage.setItem(CHAT_THREADS_STORAGE_KEY, JSON.stringify([
       { ...base, id: 'demo-thread', title: 'Demo', messages: [{ id: 'd1', role: 'assistant', content: 'Derived from demo sources', timestamp: base.createdAt }] },
+      { ...base, id: 'mixed-thread', title: 'Mixed', messages: [{ id: 'm1', role: 'user', content: 'What are the official dates?', timestamp: base.createdAt }, { id: 'm2', role: 'assistant', content: 'No demo information matches that query for 2026.', timestamp: base.updatedAt }] },
       { ...base, id: 'real-thread', title: 'Real', messages: [{ id: 'r1', role: 'assistant', content: 'A real saved answer', timestamp: base.createdAt }] },
     ]))
 
-    expect(loadChatThreads().map(thread => thread.id)).toEqual(['real-thread'])
-    expect(JSON.parse(localStorage.getItem(CHAT_THREADS_STORAGE_KEY) ?? '[]')).toHaveLength(1)
+    const threads = loadChatThreads()
+    expect(threads.map(thread => thread.id)).toEqual(['mixed-thread', 'real-thread'])
+    expect(threads.find(thread => thread.id === 'mixed-thread')?.messages.map(message => message.id)).toEqual(['m1'])
+    expect(JSON.parse(localStorage.getItem(CHAT_THREADS_STORAGE_KEY) ?? '[]')).toHaveLength(2)
   })
 
   it('recognizes only explicit addressed-thread restoration parameters', () => {

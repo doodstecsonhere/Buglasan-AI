@@ -10,7 +10,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   const isUser = message.role === 'user'
-  const timeString = formatRelativeTime(message.timestamp)
+  const timeString = message.timestamp instanceof Date && !Number.isNaN(message.timestamp.getTime()) ? formatRelativeTime(message.timestamp) : 'just now'
   
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -43,9 +43,11 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   )
 }
 
-export function renderCitedContent(content: string, sources: SourceCitation[]) {
-  const sourceById = new Map(sources.map((source) => [source.id, source]))
-  const parts = content.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[Source\s+\d+\])/g)
+export function renderCitedContent(content: unknown, sources: unknown) {
+  const safeContent = typeof content === 'string' && content.trim() ? content : 'Unable to display this message.'
+  const safeSources = Array.isArray(sources) ? sources.filter((source): source is SourceCitation => !!source && typeof source === 'object' && typeof source.id === 'string' && typeof source.title === 'string') : []
+  const sourceById = new Map(safeSources.map((source) => [source.id, source]))
+  const parts = safeContent.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[Source\s+\d+\])/g)
 
   return parts.map((part, index) => {
     const idMatch = part.match(/^_\(src:\s*([a-zA-Z0-9_-]+)\)_$/)
@@ -53,7 +55,7 @@ export function renderCitedContent(content: string, sources: SourceCitation[]) {
     const source = idMatch
       ? sourceById.get(idMatch[1])
       : numberMatch
-        ? sources[Number(numberMatch[1]) - 1]
+        ? safeSources[Number(numberMatch[1]) - 1]
         : undefined
 
     if (!source) return <span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>
@@ -67,7 +69,7 @@ export function renderCitedContent(content: string, sources: SourceCitation[]) {
         aria-label={`Open source: ${source.title}`}
         title={source.title}
       >
-        [{sources.indexOf(source) + 1}]
+        [{safeSources.indexOf(source) + 1}]
       </a>
     )
   })

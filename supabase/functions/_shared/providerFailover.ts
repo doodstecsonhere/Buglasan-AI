@@ -1,4 +1,5 @@
 import { isFailoverEligible } from './providerErrors.ts'
+import { ProviderError } from './providerErrors.ts'
 import type { ProviderAdapter } from './providerAdapters.ts'
 import type { ProviderRequest, ProviderResult } from './providerTypes.ts'
 
@@ -7,6 +8,7 @@ export interface ProviderFailoverOptions {
   signal?: AbortSignal
   maxPrimary?: number
   maxSecondary?: number
+  attemptTimeoutMs?: number
 }
 
 function failureCategory(error: unknown): string {
@@ -31,6 +33,30 @@ async function waitForRetry(ms: number, sleep: (ms: number) => Promise<void>, si
   })
 }
 
+async function generateBounded(adapter: ProviderAdapter, request: ProviderRequest, parentSignal: AbortSignal | undefined, timeoutMs: number | undefined): Promise<Awaited<ReturnType<ProviderAdapter['generate']>>> {
+  if (!timeoutMs) return adapter.generate(request, parentSignal)
+  const controller = new AbortController()
+  const abortFromParent = () => controller.abort()
+  parentSignal?.addEventListener('abort', abortFromParent, { once: true })
+  let rejectTimeout!: (error: Error) => void
+  const timeout = new Promise<never>((_, reject) => {
+    rejectTimeout = reject
+  })
+  const timer = setTimeout(() => {
+    controller.abort()
+    rejectTimeout(new ProviderError(adapter.provider, 'timeout', 'provider attempt timed out'))
+  }, timeoutMs)
+  try {
+    return await Promise.race([
+      adapter.generate(request, controller.signal),
+      timeout,
+    ])
+  } finally {
+    clearTimeout(timer)
+    parentSignal?.removeEventListener('abort', abortFromParent)
+  }
+}
+
 export async function generateWithFailover<T>(request: ProviderRequest, primary: ProviderAdapter, secondary: ProviderAdapter | undefined, parse: (text: string, provider: ProviderAdapter) => T, options: ProviderFailoverOptions = {}): Promise<ProviderResult<T>> {
   const sleep = options.sleep ?? (async () => {})
   const maxPrimary = options.maxPrimary ?? 3
@@ -39,14 +65,14 @@ export async function generateWithFailover<T>(request: ProviderRequest, primary:
   const failures: string[] = []
   for (let attempt = 1; attempt <= maxPrimary; attempt++) {
     throwIfAborted(options.signal)
-    try { const response = await primary.generate(request, options.signal); return { value: parse(response.text, primary), metadata: { provider: primary.provider, model: primary.model, attempts: attempt, retries: attempt - 1, failures } }
+    try { const response = await generateBounded(primary, request, options.signal, options.attemptTimeoutMs); return { value: parse(response.text, primary), metadata: { provider: primary.provider, model: primary.model, attempts: attempt, retries: attempt - 1, failures } }
     } catch (error) { throwIfAborted(options.signal); lastError = error; failures.push(failureCategory(error)); if (!isFailoverEligible(error) || attempt === maxPrimary) break; await waitForRetry(250 * 2 ** (attempt - 1), sleep, options.signal) }
   }
   throwIfAborted(options.signal)
   if (secondary && isFailoverEligible(lastError)) {
     for (let attempt = 1; attempt <= maxSecondary; attempt++) {
       throwIfAborted(options.signal)
-      try { const response = await secondary.generate(request, options.signal); return { value: parse(response.text, secondary), metadata: { provider: secondary.provider, model: secondary.model, attempts: maxPrimary + attempt, retries: maxPrimary + attempt - 1, failures } }
+      try { const response = await generateBounded(secondary, request, options.signal, options.attemptTimeoutMs); return { value: parse(response.text, secondary), metadata: { provider: secondary.provider, model: secondary.model, attempts: maxPrimary + attempt, retries: maxPrimary + attempt - 1, failures } }
       }
       catch (error) { throwIfAborted(options.signal); lastError = error; failures.push(failureCategory(error)); if (!isFailoverEligible(error) || attempt === maxSecondary) break; await waitForRetry(250 * 2 ** (attempt - 1), sleep, options.signal) }
     }

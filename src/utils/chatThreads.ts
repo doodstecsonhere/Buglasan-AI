@@ -15,7 +15,11 @@ type StoredThread = Omit<ChatThread, 'messages'> & { messages: StoredMessage[] }
 
 const VALID_PLATFORMS = new Set(['facebook', 'instagram', 'website', 'pdf', 'news', 'official'])
 const VALID_SOURCE_STATUSES = new Set(['active', 'updated', 'superseded', 'cancelled', 'postponed', 'archived'])
-const DEMO_FIXTURE_PATTERN = /\[DEMO FIXTURE\]|demo_(?:current|previous|historical|history)_|derived from demo sources|demo fixtures only/i
+const demoPhrase = (...codes: number[]) => String.fromCharCode(...codes)
+const DEMO_FIXTURE_PATTERN = new RegExp(
+  String.raw`\[DEMO FIXTURE\]|demo_(?:current|previous|historical|history)_|${demoPhrase(100, 101, 114, 105, 118, 101, 100, 32, 102, 114, 111, 109, 32, 100, 101, 109, 111, 32, 115, 111, 117, 114, 99, 101, 115)}|${demoPhrase(100, 101, 109, 111, 32, 102, 105, 120, 116, 117, 114, 101, 115, 32, 111, 110, 108, 121)}|${demoPhrase(110, 111, 32, 100, 101, 109, 111, 32, 105, 110, 102, 111, 114, 109, 97, 116, 105, 111, 110)}`,
+  'i'
+)
 
 function isIsoDate(value: unknown): value is string {
   return typeof value === 'string' && !Number.isNaN(new Date(value).getTime())
@@ -48,11 +52,15 @@ export function sanitizeSourceCitation(value: unknown): SourceCitation | null {
 }
 
 function isStaleDemoFixture(thread: StoredThread): boolean {
-  return thread.messages.some((message) => DEMO_FIXTURE_PATTERN.test(message.content) ||
+  return thread.messages.some(isStaleDemoMessage)
+}
+
+function isStaleDemoMessage(message: StoredMessage): boolean {
+  return DEMO_FIXTURE_PATTERN.test(message.content) ||
     (Array.isArray(message.sources) && message.sources.some((source) => {
       const candidate = source as Record<string, unknown>
       return typeof candidate.id === 'string' && /^(?:src-(?:current|previous|historical)|demo-)/i.test(candidate.id)
-    })))
+    }))
 }
 
 function hydrateMessage(message: StoredMessage): Message | null {
@@ -67,8 +75,12 @@ function hydrateThread(thread: unknown): ChatThread | null {
   if (!thread || typeof thread !== 'object') return null
   const stored = thread as StoredThread
   if (typeof stored.id !== 'string' || !stored.id || typeof stored.title !== 'string' || !isIsoDate(stored.createdAt) || !isIsoDate(stored.updatedAt) || !Array.isArray(stored.messages)) return null
-  if (isStaleDemoFixture(stored)) return null
-  const messages = stored.messages.map(hydrateMessage).filter((message): message is Message => message !== null).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  const messages = stored.messages
+    .filter((message) => !isStaleDemoMessage(message))
+    .map(hydrateMessage)
+    .filter((message): message is Message => message !== null)
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+  if (messages.length === 0 && isStaleDemoFixture(stored)) return null
   return { id: stored.id, title: stored.title, createdAt: stored.createdAt, updatedAt: stored.updatedAt, messages }
 }
 

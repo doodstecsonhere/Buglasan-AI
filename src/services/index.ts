@@ -2,5 +2,5 @@
  * Buglasan AI - Services Barrel Export
  */
 
-export { chatService, ChatService, ChatRequestAbortedError } from './chatService'
+export { chatService, ChatService, ChatRequestAbortedError, ChatResponseValidationError } from './chatService'
 export type { ChatServiceConfig } from './chatService'

@@ -5,7 +5,7 @@ import { ChatHistoryDrawer } from './components/ChatHistoryDrawer'
 import { AIDisclaimer } from './components/AIDisclaimer'
 import type { Message } from './types'
 import { getCurrentFestivalYear } from './utils/dateUtils'
-import { ChatRequestAbortedError, chatService } from './services'
+import { ChatRequestAbortedError, ChatResponseValidationError, chatService } from './services'
 import { addressedThreadId, createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, updateChatThreadMessages, type ChatThread } from './utils/chatThreads'
 import { readInstallDismissed, writeInstallDismissed } from './utils/installPrompt'
 
@@ -82,9 +82,13 @@ function App() {
     } catch (error) {
       console.error('Chat error:', error)
       if (error instanceof ChatRequestAbortedError) return
-      setErrorMessage(error instanceof Error && error.name === 'ChatTimeoutError'
+      const failure = error instanceof Error && error.name === 'ChatTimeoutError'
         ? 'The answer took too long. No retry was sent automatically; please try once more.'
-        : 'We could not get an answer. Check your connection and try again.')
+        : error instanceof ChatResponseValidationError
+          ? 'We received an incomplete answer. Please try your question again.'
+          : 'We could not get an answer. Check your connection and try again.'
+      persistMessages([...history, { id: crypto.randomUUID(), role: 'assistant', content: failure, timestamp: new Date(), sources: [] }], originThreadId, false)
+      setErrorMessage(failure)
     } finally { if (requestControllerRef.current === requestController) requestControllerRef.current = null; setIsLoading(false) }
   }, [activeThreadId, chatLanguage, festivalYear, isLoading, isOnline, messages, persistMessages])
 

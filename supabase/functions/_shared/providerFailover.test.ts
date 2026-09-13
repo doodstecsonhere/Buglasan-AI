@@ -24,7 +24,7 @@ describe('provider failover foundation', () => {
     const primary = { ...adapter('gemini'), generate: async () => { primaryCalls++; throw new ProviderError('gemini', 'upstream_503', 'safe') } }
     const secondary = { ...adapter('openai_compatible'), generate: async () => { secondaryCalls++; return { text: 'unexpected', provider: 'openai_compatible' as const, model: 'test' } } }
     const pending = generateWithFailover({ prompt: 'x' }, primary, secondary, (text) => text, { signal: controller.signal, sleep, maxPrimary: 3 })
-    await Promise.resolve()
+    while (!releaseSleep) await Promise.resolve()
     controller.abort('raw cancellation detail')
     releaseSleep()
     await expect(pending).rejects.toMatchObject({ message: 'provider operation aborted' })
@@ -38,6 +38,23 @@ describe('provider failover foundation', () => {
     const secondary = { ...adapter('openai_compatible'), generate: async () => { secondaryCalls++; return { text: 'unexpected', provider: 'openai_compatible' as const, model: 'test' } } }
     await expect(generateWithFailover({ prompt: 'x' }, primary, secondary, (text) => text, { signal: controller.signal, maxPrimary: 1 })).rejects.toMatchObject({ message: 'provider operation aborted' })
     expect(secondaryCalls).toBe(0)
+  })
+  it('aborts each timed-out attempt before bounded retry/failover', async () => {
+    const received: AbortSignal[] = []
+    const primary: ProviderAdapter = {
+      provider: 'gemini', model: 'test',
+      async generate(_request, signal) {
+        received.push(signal as AbortSignal)
+        return new Promise(() => {})
+      },
+    }
+    const secondary = adapter('openai_compatible')
+    const result = await generateWithFailover({ prompt: 'x' }, primary, secondary, (text) => text, {
+      maxPrimary: 1, maxSecondary: 1, attemptTimeoutMs: 10,
+    })
+    expect(result.value).toBe('ok')
+    expect(received).toHaveLength(1)
+    expect(received[0].aborted).toBe(true)
   })
   it('falls back only after transient exhaustion and bounds attempts', async () => { let secondaryCalls = 0; const secondary = adapter('openai_compatible'); const wrapped = { ...secondary, generate: async () => { secondaryCalls++; if (secondaryCalls === 1) throw new ProviderError('openai_compatible', 'upstream_503', 'x'); return { text: 'ok', provider: 'openai_compatible' as const, model: 'test' } } }; const result = await generateWithFailover({ prompt: 'x' }, adapter('gemini', [new ProviderError('gemini', 'upstream_503', 'x'), new ProviderError('gemini', 'upstream_503', 'x'), new ProviderError('gemini', 'upstream_503', 'x')]), wrapped, (text) => text); expect(result.value).toBe('ok'); expect(secondaryCalls).toBe(2) })
   it('does not fallback for deterministic failures', async () => { await expect(generateWithFailover({ prompt: 'x' }, adapter('gemini', [new ProviderError('gemini', 'invalid_request', 'x')]), adapter('openai_compatible'), (text) => text)).rejects.toThrow('x') })

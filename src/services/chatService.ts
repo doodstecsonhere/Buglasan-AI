@@ -14,19 +14,10 @@
  */
 
 import type { Source, Event, FestivalYear, SourceCitation, ClaimCitation, ChatLanguage } from '../types'
-import { resolveFestivalYear, getCurrentFestivalYear, getCurrentDateInPH } from '../utils/dateUtils'
-import {
-  demoSources,
-  demoEvents,
-  getCurrentSourcesForYear,
-  getCurrentEventsForYear,
-  getPrimarySourcesForEvent,
-  getVenueSourceForEvent,
-  getOrganizerSourceForEvent,
-  isDemoFixture,
-} from '../data/demoData'
+import { resolveFestivalYear, getCurrentFestivalYear } from '../utils/dateUtils'
 
-const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== 'false'
+const DEMO_MODE = import.meta.env.MODE === 'test' || __DEMO_BUILD__
+const loadDemoRuntime = DEMO_MODE ? () => import('./demoChatRuntime') : null
 const CHAT_REQUEST_TIMEOUT_MS = 45_000
 
 /**
@@ -63,6 +54,14 @@ export class ChatRequestAbortedError extends Error {
   constructor() {
     super('Chat request was cancelled.')
     this.name = 'ChatRequestAbortedError'
+  }
+}
+
+/** The Edge Function returned JSON, but not a response safe for the chat UI. */
+export class ChatResponseValidationError extends Error {
+  constructor(message = 'The chat service returned an incomplete response.') {
+    super(message)
+    this.name = 'ChatResponseValidationError'
   }
 }
 
@@ -148,7 +147,52 @@ export function mapValidatedCitations(response: string, sources: Source[]): { ci
 }
 
 function toSourceCitation(s: Source): SourceCitation {
-  return { id: s.id, title: s.title ?? (stripDemoMarker(s.normalizedText ?? s.rawText ?? '').substring(0, 100) || 'Untitled source'), platform: s.platform, postUrl: s.postUrl, publishedAt: s.publishedAt, festivalYear: s.festivalYear, status: s.status, supersedesSourceId: s.supersedesSourceId }
+  return { id: s.id, title: s.title ?? ((s.normalizedText ?? s.rawText ?? '').substring(0, 100) || 'Untitled source'), platform: s.platform, postUrl: s.postUrl, publishedAt: s.publishedAt, festivalYear: s.festivalYear, status: s.status, supersedesSourceId: s.supersedesSourceId }
+}
+
+const PLATFORMS = new Set(['facebook', 'instagram', 'website', 'pdf', 'news', 'official'])
+const SOURCE_STATUSES = new Set(['active', 'updated', 'superseded', 'cancelled', 'postponed', 'archived'])
+const LANGUAGES = new Set<ChatLanguage>(['en', 'ceb', 'fil'])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validIsoTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && !Number.isNaN(new Date(value).getTime())
+}
+
+function validYear(value: unknown): value is FestivalYear {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 2020 && value <= 2100
+}
+
+function dateFrom(value: unknown, fallback = Date.now()): Date {
+  return typeof value === 'string' || typeof value === 'number' ? new Date(value) : new Date(fallback)
+}
+
+function isClaimCitation(value: unknown): value is ClaimCitation {
+  return isRecord(value) && typeof value.claimIndex === 'number' && Number.isInteger(value.claimIndex) && value.claimIndex >= 0 &&
+    typeof value.sourceId === 'string' && typeof value.marker === 'string'
+}
+
+function normalizeSourceCitation(value: unknown): SourceCitation | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim() || typeof value.title !== 'string' ||
+    !PLATFORMS.has(value.platform as string) || !SOURCE_STATUSES.has(value.status as string)) return null
+  const publishedAt = value.published_at ?? value.publishedAt
+  if (publishedAt !== null && publishedAt !== undefined && !validIsoTimestamp(publishedAt)) return null
+  const festivalYear = value.festival_year ?? value.festivalYear
+  if (festivalYear !== null && festivalYear !== undefined && !validYear(festivalYear)) return null
+  return {
+    id: value.id,
+    postId: typeof (value.post_id ?? value.postId) === 'string' ? (value.post_id ?? value.postId) as string : undefined,
+    title: value.title.trim() || 'Untitled source',
+    platform: value.platform as SourceCitation['platform'],
+    postUrl: typeof (value.post_url ?? value.postUrl) === 'string' ? (value.post_url ?? value.postUrl) as string : '',
+    publishedAt: publishedAt ? new Date(publishedAt) : null,
+    festivalYear: festivalYear ?? null,
+    status: value.status as SourceCitation['status'],
+    supersedesSourceId: typeof (value.supersedes_source_id ?? value.supersedesSourceId) === 'string' ? (value.supersedes_source_id ?? value.supersedesSourceId) as string : undefined,
+  }
 }
 
 /**
@@ -165,52 +209,14 @@ export interface ChunkSummary {
   sourceFestivalYear: FestivalYear
 }
 
-// ===========================================================================
-// Module-level helpers (single source of truth for parsing demo source text)
-// ===========================================================================
-
-/**
- * Strip the [DEMO FIXTURE] marker from a string for display purposes.
- */
-function stripDemoMarker(text: string): string {
-  return text.replace(/\[DEMO FIXTURE\]\s*/g, '').trim()
-}
-
-/**
- * Derive a venue string from a backing source's normalizedText.
- * Falls back to the provided string if the source doesn't contain a venue.
- */
-function extractVenueFromSource(source: Source, fallback: string): string {
-  if (!source) return fallback
-  const text = stripDemoMarker(source.normalizedText ?? source.rawText ?? '')
-  const match = text.match(/Venue(?:s)?:\s*([^.\n]+)/i)
-  if (match) {
-    const raw = match[1].split(/\.\s+Hosts?:/i)[0].trim()
-    return raw.replace(/\s*\(.*$/, '').trim() || fallback
-  }
-  return fallback
-}
-
-/**
- * Derive an organizer string from a backing source's normalizedText.
- */
-function extractOrganizerFromSource(source: Source, fallback: string): string {
-  if (!source) return fallback
-  const text = stripDemoMarker(source.normalizedText ?? source.rawText ?? '')
-  const match = text.match(/Organizer(?:s)?(?:\s+for[^:]+)?:\s*([^.\n]+)/i)
-  if (match) {
-    return match[1].trim() || fallback
-  }
-  return fallback
-}
-
 class ChatService {
   private config: ChatServiceConfig
   private demoMode: boolean
 
   constructor(config: ChatServiceConfig = {}) {
     this.config = config
-    this.demoMode = config.demoMode ?? DEMO_MODE
+    // A caller cannot re-enable fixtures in a production bundle.
+    this.demoMode = DEMO_MODE && (config.demoMode ?? true)
   }
 
   async sendMessage(request: ChatRequest): Promise<ChatResponse> {
@@ -218,7 +224,7 @@ class ChatService {
     const resolved = resolveFestivalYear(request.message, request.festivalYear)
     const festivalYear = resolved.festivalYear
 
-    if (this.demoMode) {
+    if (DEMO_MODE && this.demoMode) {
       return this.sendMessageDemo(request, festivalYear)
     }
 
@@ -230,267 +236,13 @@ class ChatService {
   // ===========================================================================
 
   private async sendMessageDemo(request: ChatRequest, festivalYear: FestivalYear): Promise<ChatResponse> {
-    const { message } = request
-    const language = resolveChatLanguage(message, request.language ?? 'en')
-
-    await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 400))
-
-    // Cross-year isolation: only sources for the requested year.
-    const yearSources = getCurrentSourcesForYear(festivalYear)
-    const yearEvents = getCurrentEventsForYear(festivalYear)
-
-    const responseContent = this.generateDemoResponse(message, festivalYear, yearSources, yearEvents, language)
-    const { citations, claimCitations } = mapValidatedCitations(responseContent, yearSources)
-
-    return {
-      message: {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: responseContent,
-        timestamp: new Date().toISOString(),
-        sources: citations,
-        festivalYear,
-        claimCitations,
-      },
-      retrievedSources: yearSources,
-      retrievedEvents: yearEvents,
-      retrievedChunks: [],
-      yearResolved: festivalYear,
-      language,
-    }
-  }
-
-  /**
-   * Build the demo assistant message.
-   *
-   * All factual claims in the response come from `demoSources` records — never
-   * from hard-coded strings inside this function. The function dispatches on
-   * query intent and reads from the source-backed data, demonstrating:
-   *
-   *   1. Year resolution — sources filtered by `festivalYear`
-   *   2. Cross-year isolation — superseded/archived sources excluded by default
-   *   3. Supersession — superseded sources never returned as primary evidence
-   *   4. Temporal filtering — "upcoming" filters by current date
-   *   5. Zero evidence — honest "no demo information found" when no source matches
-   */
-  private generateDemoResponse(
-    query: string,
-    year: FestivalYear,
-    sources: Source[],
-    events: Event[],
-    language: 'en' | 'ceb' | 'fil'
-  ): string {
-    const lowerQuery = query.toLowerCase().trim()
-    const now = getCurrentDateInPH()
-
-    const t = {
-      en: {
-        scheduleHeader: (y: FestivalYear) => `📅 **Buglasan Festival ${y}** schedule (derived from demo sources):`,
-        venueHeader: (y: FestivalYear) => `📍 **Venues for Buglasan Festival ${y}** (derived from demo sources):`,
-        historyHeader: `📜 **About Buglasan** (derived from demo history source):`,
-        registrationHeader: (y: FestivalYear) => `📝 **Registration info for ${y}** (derived from demo source):`,
-        foodHeader: (y: FestivalYear) => `🍽️ **Buglasan Food Fair ${y}** (derived from demo source):`,
-        upcomingHeader: (y: FestivalYear) => `⏭️ **Upcoming events for ${y}** (after ${now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}):`,
-        supersessionHeader: (y: FestivalYear) => `🔄 **Venue / organizer changes for ${y}** (supersession in effect):`,
-        noInfo: (y: FestivalYear) => `No demo information found for ${y}. Try asking about schedule, venues, registration, food fair, or history — or switch the festival year.`,
-        noMatch: (y: FestivalYear) => `No demo information matches that query for ${y}.`,
-        organizerLine: (org: string, src: Source) => `   • Organizer: **${org}** _(src: ${src.id})_`,
-        venueLine: (venue: string, src: Source) => `   • Venue: **${venue}** _(src: ${src.id})_`,
-        scheduleNote: `*Note: Demo fixtures only. Real ingestion will replace this data.*`,
-        suggestion: (y: FestivalYear) => `Try asking about schedule, venues, registration, food fair, or history for ${y}.`,
-      },
-      ceb: {
-        scheduleHeader: (y: FestivalYear) => `📅 **Buglasan Festival ${y}** nga schedule (gikan sa demo sources):`,
-        venueHeader: (y: FestivalYear) => `📍 **Mga venue sa Buglasan Festival ${y}** (gikan sa demo sources):`,
-        historyHeader: `📜 **Mahitungod sa Buglasan** (gikan sa demo history source):`,
-        registrationHeader: (y: FestivalYear) => `📝 **Registration info alang sa ${y}** (gikan sa demo source):`,
-        foodHeader: (y: FestivalYear) => `🍽️ **Buglasan Food Fair ${y}** (gikan sa demo source):`,
-        upcomingHeader: (y: FestivalYear) => `⏭️ **Sunod nga mga event alang sa ${y}** (human sa ${now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}):`,
-        supersessionHeader: (y: FestivalYear) => `🔄 **Mga pagbag-o sa venue / organizer alang sa ${y}** (supersession):`,
-        noInfo: (y: FestivalYear) => `Walay demo nga impormasyon nga nakaplagan alang sa ${y}.`,
-        noMatch: (y: FestivalYear) => `Walay demo nga impormasyon nga nagtugma sa pangutana alang sa ${y}.`,
-        organizerLine: (org: string, src: Source) => `   • Organizer: **${org}** _(src: ${src.id})_`,
-        venueLine: (venue: string, src: Source) => `   • Venue: **${venue}** _(src: ${src.id})_`,
-        scheduleNote: `*Matikod: Demo fixtures lamang. Real ingestion mopuli niini.*`,
-        suggestion: (y: FestivalYear) => `Pangutan-a ang schedule, mga venue, registration, food fair, o history alang sa ${y}.`,
-      },
-      fil: {
-        scheduleHeader: (y: FestivalYear) => `📅 **Buglasan Festival ${y}** schedule (mula sa demo sources):`,
-        venueHeader: (y: FestivalYear) => `📍 **Mga venue para sa Buglasan Festival ${y}** (mula sa demo sources):`,
-        historyHeader: `📜 **Tungkol sa Buglasan** (mula sa demo history source):`,
-        registrationHeader: (y: FestivalYear) => `📝 **Registration info para sa ${y}** (mula sa demo source):`,
-        foodHeader: (y: FestivalYear) => `🍽️ **Buglasan Food Fair ${y}** (mula sa demo source):`,
-        upcomingHeader: (y: FestivalYear) => `⏭️ **Paparating na mga event para sa ${y}** (pagkatapos ng ${now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}):`,
-        supersessionHeader: (y: FestivalYear) => `🔄 **Mga pagbabago sa venue / organizer para sa ${y}** (supersession):`,
-        noInfo: (y: FestivalYear) => `Walang demo information na nahanap para sa ${y}.`,
-        noMatch: (y: FestivalYear) => `Walang demo information na tumutugma sa tanong para sa ${y}.`,
-        organizerLine: (org: string, src: Source) => `   • Organizer: **${org}** _(src: ${src.id})_`,
-        venueLine: (venue: string, src: Source) => `   • Venue: **${venue}** _(src: ${src.id})_`,
-        scheduleNote: `*Tandaan: Demo fixtures lang. Real ingestion papalit nito.*`,
-        suggestion: (y: FestivalYear) => `Magtanong tungkol sa schedule, mga venue, registration, food fair, o history para sa ${y}.`,
-      },
-    }
-
-    const lang = t[language] || t.en
-
-    // ---------- Detect intent (keyword-based, simple) ----------
-    const wantsSchedule = /\b(schedule|what\s+events|when|what\s+is\s+happening|lineup|iskedyul|kalihokan|kanus-a|kaganapan)\b/.test(lowerQuery)
-    const wantsVenue = /\b(venue|where|location|place|asa|lugar|saan)\b/.test(lowerQuery)
-    const wantsHistory = /\b(history|origin|meaning|buglas|about|tell\s+me\s+about|kasaysayan|tradisyon|tungkol)\b/.test(lowerQuery)
-    const wantsRegister = /\b(register|join|participate|sign\s+up|deadline|how\s+to|rehistro|pagpaparehistro)\b/.test(lowerQuery)
-    const wantsFood = /\b(food|delicac|eat|fair|cuisine|pagkaon|pagkain)\b/.test(lowerQuery)
-    const wantsUpcoming = /\b(upcoming|coming|soon|next|future|forward)\b/.test(lowerQuery)
-    const wantsSupersession = /\b(change|update|supersed|moved|relocated|new\s+venue|correction)\b/.test(lowerQuery)
-
-    // ---------- Supersession demo ----------
-    if (wantsSupersession) {
-      const supersededSources = sources.filter(s => s.status === 'superseded')
-      const updateSources = sources.filter(s => s.status === 'updated')
-
-      if (supersededSources.length === 0 && updateSources.length === 0) {
-        return `${lang.supersessionHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
-      }
-
-      let content = `${lang.supersessionHeader(year)}\n\n`
-      for (const sup of updateSources) {
-        content += `🆕 **${stripDemoMarker(sup.normalizedText ?? sup.rawText ?? '')}**\n`
-        if (sup.supersedesSourceId) {
-          const oldSrc = demoSources.find(s => s.id === sup.supersedesSourceId)
-          if (oldSrc) {
-            content += `   ↪️ Supersedes: ${stripDemoMarker(oldSrc.normalizedText ?? oldSrc.rawText ?? '')}\n`
-          }
-        }
-        content += '\n'
-      }
-      content += `${lang.scheduleNote}`
-      return content
-    }
-
-    // ---------- History demo ----------
-    if (wantsHistory) {
-      // History source is `src-history-meaning` (festivalYear = previousYear).
-      const historySource = demoSources.find(s => s.id === 'src-history-meaning')
-
-      if (!historySource) {
-        return `${lang.historyHeader}\n\n${lang.noInfo(year)}\n\n${lang.scheduleNote}`
-      }
-
-      let content = `${lang.historyHeader}\n\n${stripDemoMarker(historySource.normalizedText ?? historySource.rawText ?? '')}\n\n`
-      if (historySource.festivalYear !== year) {
-        content += `_(Historical reference from ${historySource.festivalYear})_\n\n`
-      }
-      content += `${lang.scheduleNote}`
-      return content
-    }
-
-    // ---------- Registration demo ----------
-    if (wantsRegister) {
-      const regSource = sources.find(s => (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('registration'))
-
-      if (!regSource) {
-        return `${lang.registrationHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
-      }
-
-      return `${lang.registrationHeader(year)}\n\n${stripDemoMarker(regSource.normalizedText ?? regSource.rawText ?? '')} _(src: ${regSource.id})_\n\n${lang.scheduleNote}`
-    }
-
-    // ---------- Food fair demo ----------
-    if (wantsFood) {
-      const foodSource = sources.find(s => (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('food') || (s.normalizedText ?? s.rawText ?? '').toLowerCase().includes('fair'))
-
-      if (!foodSource) {
-        return `${lang.foodHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
-      }
-
-      return `${lang.foodHeader(year)}\n\n${stripDemoMarker(foodSource.normalizedText ?? foodSource.rawText ?? '')} _(src: ${foodSource.id})_\n\n${lang.scheduleNote}`
-    }
-
-    // ---------- Upcoming demo (temporal filtering) ----------
-    if (wantsUpcoming) {
-      const upcoming = events.filter(e => new Date(e.startDatetime).getTime() >= now.getTime())
-
-      if (upcoming.length === 0) {
-        return `${lang.upcomingHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
-      }
-
-      let content = `${lang.upcomingHeader(year)}\n\n`
-      for (const evt of upcoming) {
-        const start = new Date(evt.startDatetime).toLocaleDateString('en-PH', {
-          timeZone: 'Asia/Manila', weekday: 'short', month: 'short', day: 'numeric',
-        })
-        const time = new Date(evt.startDatetime).toLocaleTimeString('en-PH', {
-          timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit',
-        })
-        const venueSrc = getVenueSourceForEvent(evt.id)
-        const orgSrc = getOrganizerSourceForEvent(evt.id)
-        content += `🎭 **${evt.eventName}** — ${start}, ${time}\n`
-        if (venueSrc) content += lang.venueLine(extractVenueFromSource(venueSrc, evt.venue), venueSrc) + '\n'
-        if (orgSrc) content += lang.organizerLine(extractOrganizerFromSource(orgSrc, evt.organizer), orgSrc) + '\n'
-        content += '\n'
-      }
-      content += `${lang.scheduleNote}`
-      return content
-    }
-
-    // ---------- Venue demo ----------
-    if (wantsVenue) {
-      if (events.length === 0) {
-        return `${lang.venueHeader(year)}\n\n${lang.noMatch(year)}\n\n${lang.scheduleNote}`
-      }
-
-      let content = `${lang.venueHeader(year)}\n\n`
-      for (const evt of events) {
-        const venueSrc = getVenueSourceForEvent(evt.id)
-        const venueName = venueSrc ? extractVenueFromSource(venueSrc, evt.venue) : evt.venue
-        const marker = isDemoFixture(venueSrc?.normalizedText ?? undefined) ? '🧪' : '📍'
-        content += `${marker} **${evt.eventName}** → ${venueName}\n`
-        if (venueSrc) content += `   _(source: ${venueSrc.id})_\n`
-        content += '\n'
-      }
-      content += `${lang.scheduleNote}`
-      return content
-    }
-
-    // ---------- Schedule demo ----------
-    if (wantsSchedule) {
-      if (events.length === 0) {
-        return `${lang.scheduleHeader(year)}\n\n${lang.noInfo(year)}\n\n${lang.scheduleNote}`
-      }
-
-      let content = `${lang.scheduleHeader(year)}\n\n`
-      const sorted = [...events].sort((a, b) => new Date(a.startDatetime).getTime() - new Date(b.startDatetime).getTime())
-      for (const evt of sorted) {
-        const start = new Date(evt.startDatetime).toLocaleDateString('en-PH', {
-          timeZone: 'Asia/Manila', weekday: 'short', month: 'short', day: 'numeric',
-        })
-        const time = new Date(evt.startDatetime).toLocaleTimeString('en-PH', {
-          timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit',
-        })
-        const primary = getPrimarySourcesForEvent(evt.id)
-        const firstSrc = primary[0]
-        const venueSrc = getVenueSourceForEvent(evt.id)
-        const orgSrc = getOrganizerSourceForEvent(evt.id)
-        const venueName = venueSrc ? extractVenueFromSource(venueSrc, evt.venue) : evt.venue
-        const orgName = orgSrc ? extractOrganizerFromSource(orgSrc, evt.organizer) : evt.organizer
-
-        content += `🎭 **${evt.eventName}** — ${start}, ${time}\n`
-        content += `   • Venue: **${venueName}**${venueSrc ? ` _(src: ${venueSrc.id})_` : ''}\n`
-        content += `   • Organizer: **${orgName}**${orgSrc ? ` _(src: ${orgSrc.id})_` : ''}\n`
-        if (firstSrc) {
-          content += `   • Source: ${firstSrc.id}\n`
-        }
-        content += '\n'
-      }
-      content += `${lang.scheduleNote}`
-      return content
-    }
-
-    // ---------- Zero-evidence fallback ----------
-    if (lowerQuery.length > 0) {
-      return `${lang.noMatch(year)}\n\n${lang.suggestion(year)}\n\n${lang.scheduleNote}`
-    }
-
-    return `${lang.noInfo(year)}\n\n${lang.suggestion(year)}\n\n${lang.scheduleNote}`
+    if (!loadDemoRuntime) throw new ChatConfigurationError('Demo responses are unavailable in this build.')
+    const language = resolveChatLanguage(request.message, request.language ?? 'en')
+    const { sendDemoMessage } = await loadDemoRuntime()
+    return sendDemoMessage(request, festivalYear, language, (content, sources) => {
+      const { citations, claimCitations } = mapValidatedCitations(content, sources)
+      return { sources: citations, claimCitations }
+    })
   }
 
   // ===========================================================================
@@ -530,33 +282,56 @@ class ChatService {
       throw new Error(error.error || `HTTP ${response.status}`)
     }
 
-    const data = (await response.json()) as ChatResponse
-    if (Array.isArray(data.retrievedSources)) {
-      data.retrievedSources = data.retrievedSources.map((s) => this.hydrateSource(s))
-    }
-    if (Array.isArray(data.retrievedEvents)) {
-      data.retrievedEvents = data.retrievedEvents.map((e) => this.hydrateEvent(e))
-    }
-    return data
+    const data: unknown = await response.json().catch(() => {
+      throw new ChatResponseValidationError('The chat service returned invalid JSON.')
+    })
+    return this.validateLiveResponse(data)
   }
 
-  private hydrateSource(s: any): Source {
+  private validateLiveResponse(data: unknown): ChatResponse {
+    if (!isRecord(data) || !isRecord(data.message) || !Array.isArray(data.retrievedSources) || !Array.isArray(data.retrievedEvents) ||
+      !validYear(data.yearResolved) || !LANGUAGES.has(data.language as ChatLanguage)) {
+      throw new ChatResponseValidationError()
+    }
+    const message = data.message
+    if (typeof message.id !== 'string' || !message.id.trim() || message.role !== 'assistant' ||
+      typeof message.content !== 'string' || !message.content.trim() || !validIsoTimestamp(message.timestamp) || !validYear(message.festivalYear)) {
+      throw new ChatResponseValidationError()
+    }
+
+    const sources = Array.isArray(message.sources)
+      ? message.sources.map(normalizeSourceCitation).filter((source): source is SourceCitation => source !== null)
+      : []
+    const claimCitations = Array.isArray(message.claimCitations)
+      ? message.claimCitations.filter(isClaimCitation)
+      : undefined
+
+    return {
+      message: { id: message.id, role: 'assistant', content: message.content.trim(), timestamp: message.timestamp, sources, festivalYear: message.festivalYear, ...(claimCitations && { claimCitations }) },
+      retrievedSources: data.retrievedSources.filter(isRecord).map((source) => this.hydrateSource(source)),
+      retrievedEvents: data.retrievedEvents.filter(isRecord).map((event) => this.hydrateEvent(event)),
+      yearResolved: data.yearResolved,
+      language: data.language as ChatLanguage,
+    }
+  }
+
+  private hydrateSource(s: Record<string, unknown>): Source {
     return {
       ...s,
-      publishedAt: (s.published_at ?? s.publishedAt) ? new Date(s.published_at ?? s.publishedAt) : null,
-      ingestedAt: new Date(s.ingested_at ?? s.ingestedAt ?? Date.now()),
-      updatedAt: new Date(s.updated_at ?? s.updatedAt ?? Date.now()),
+      publishedAt: (s.published_at ?? s.publishedAt) ? dateFrom(s.published_at ?? s.publishedAt) : null,
+      ingestedAt: dateFrom(s.ingested_at ?? s.ingestedAt),
+      updatedAt: dateFrom(s.updated_at ?? s.updatedAt),
     } as Source
   }
 
-  private hydrateEvent(e: any): Event {
+  private hydrateEvent(e: Record<string, unknown>): Event {
     return {
       ...e,
-      startDatetime: new Date(e.start_datetime ?? e.startDatetime),
-      endDatetime: new Date(e.end_datetime ?? e.endDatetime),
-      deadline: e.deadline ? new Date(e.deadline) : undefined,
-      createdAt: new Date(e.created_at ?? e.createdAt ?? Date.now()),
-      updatedAt: new Date(e.updated_at ?? e.updatedAt ?? Date.now()),
+      startDatetime: dateFrom(e.start_datetime ?? e.startDatetime),
+      endDatetime: dateFrom(e.end_datetime ?? e.endDatetime),
+      deadline: e.deadline ? dateFrom(e.deadline) : undefined,
+      createdAt: dateFrom(e.created_at ?? e.createdAt),
+      updatedAt: dateFrom(e.updated_at ?? e.updatedAt),
     } as Event
   }
 
@@ -564,11 +339,8 @@ class ChatService {
   // Public helpers
   // ===========================================================================
 
-  getAvailableYears(): FestivalYear[] {
-    const years = new Set<FestivalYear>()
-    for (const s of demoSources) if (s.festivalYear !== null) years.add(s.festivalYear)
-    for (const e of demoEvents) years.add(e.festivalYear)
-    return Array.from(years).sort((a, b) => b - a)
+  async getAvailableYears(): Promise<FestivalYear[]> {
+    return []
   }
 
   getCurrentFestivalYear(): FestivalYear {
@@ -580,7 +352,7 @@ class ChatService {
   }
 
   setDemoMode(enabled: boolean): void {
-    this.demoMode = enabled
+    this.demoMode = DEMO_MODE && enabled
   }
 
   isDemoMode(): boolean {

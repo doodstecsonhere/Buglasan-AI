@@ -5,8 +5,16 @@ const assertEquals = (actual: unknown, expected: unknown): void => {
 }
 import {
   buildInclusiveDateArithmeticGuidance,
+  buildNoVerifiedEventListingFallback,
+  buildGroundedGenerationFallback,
+  buildTemporaryServiceError,
   getDeterministicHarmlessResponse,
+  getLightweightConversationResponse,
+  getOutOfScopeResponse,
   getLexicalEvidenceTerms,
+  isFutureDiscoveryQuery,
+  isTemporalOnlyQuery,
+  isEventWindowQuery,
   mapValidatedClaimCitations,
   isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
@@ -57,4 +65,23 @@ Deno.test('grounding: harmless arithmetic is deterministic and bypasses factual 
   assertEquals(getDeterministicHarmlessResponse('2 + 2'), '4')
   assertEquals(getDeterministicHarmlessResponse('whats 2 plus 2'), '4')
   assertEquals(getDeterministicHarmlessResponse('2 / 0'), 'I cannot divide by zero.')
+})
+
+Deno.test('grounding: standalone tomorrow is temporal-only and broad discovery is recognized', () => {
+  assertEquals(isTemporalOnlyQuery('What is happening tomorrow?'), true)
+  assertEquals(isFutureDiscoveryQuery('Anything interesting coming up?'), true)
+})
+
+Deno.test('grounding: greetings and unrelated questions bypass retrieval with deterministic responses', () => {
+  assertEquals(getLightweightConversationResponse('Hello!', 'en')?.includes('verified Buglasan Festival'), true)
+  assertEquals(getLightweightConversationResponse('What can you do?', 'en')?.includes('schedules'), true)
+  assertEquals(getOutOfScopeResponse('Who won the World Cup?', 'en')?.includes('Buglasan AI'), true)
+})
+
+Deno.test('grounding: temporal event windows require event evidence rather than generic sources', () => {
+  assertEquals(isEventWindowQuery('What events are coming up for Buglasan 2026?'), true)
+  assertEquals(buildNoVerifiedEventListingFallback(2026, 'en').includes('No verified Buglasan Festival 2026 event listing'), true)
+  assertEquals(buildTemporaryServiceError('en').includes('temporarily unavailable'), true)
+  assertEquals(isEventWindowQuery('When is Buglasan Festival 2026?'), true)
+  assertEquals(buildGroundedGenerationFallback('en').includes('relevant official Buglasan information'), true)
 })

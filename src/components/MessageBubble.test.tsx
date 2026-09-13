@@ -66,4 +66,11 @@ describe('MessageBubble response rendering', () => {
     expect(citationLink.props.href).toBe('https://negor.gov.ph/buglasan')
     expect(citationLink.props['aria-label']).toBe('Open source: Official festival page')
   })
+
+  it('keeps rendering a visible fallback for malformed message content and citations', () => {
+    const rendered = renderCitedContent(null, [{ id: 1 }])
+    const fallback = element(rendered[0])
+    expect(fallback.type).toBe('span')
+    expect(fallback.props.children).toContain('Unable to display this message.')
+  })
 })

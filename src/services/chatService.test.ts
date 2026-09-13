@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { ChatConfigurationError, ChatService, ChatTimeoutError, mapValidatedCitations, resolveChatEndpoint, resolveChatLanguage } from './chatService'
+import { ChatConfigurationError, ChatResponseValidationError, ChatService, ChatTimeoutError, mapValidatedCitations, resolveChatEndpoint, resolveChatLanguage } from './chatService'
 import { currentYear, previousYear, demoSources } from '../data/demoData'
 
 // We don't mock the date — the demo data is built around `currentYear`,
@@ -230,6 +230,45 @@ describe('ChatService year resolution contract', () => {
 })
 
 describe('ChatService live delivery contract', () => {
+  it('uses the live endpoint for an off-topic harmless query instead of a demo fallback', async () => {
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      message: { id: 'live-1', role: 'assistant', content: 'I do not have verified information about that topic.', timestamp: new Date().toISOString(), sources: [], festivalYear: 2026 },
+      retrievedSources: [], retrievedEvents: [], yearResolved: 2026, language: 'en',
+    })))
+    globalThis.fetch = fetchMock as typeof fetch
+    try {
+      const response = await new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat' })
+        .sendMessage({ message: 'What is the weather on Mars?' })
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(response.message.content).not.toContain('No demo information')
+      expect(response.message.content).not.toContain('Demo fixtures')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('keeps accepted official records distinguishable and queryable without trusting fixture-shaped records', async () => {
+    const originalFetch = globalThis.fetch
+    const officialSource = {
+      id: 'official-2026-001', post_id: 'post-1', title: 'Official Buglasan advisory', platform: 'official',
+      post_url: 'https://negor.gov.ph/buglasan-advisory', published_at: '2026-09-01T00:00:00.000Z', festival_year: 2026, status: 'active',
+    }
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: { id: 'live-2', role: 'assistant', content: 'Official advisory _(src: official-2026-001)_', timestamp: new Date().toISOString(), sources: [officialSource], festivalYear: 2026 },
+      retrievedSources: [officialSource], retrievedEvents: [], yearResolved: 2026, language: 'en',
+    }))) as typeof fetch
+    try {
+      const response = await new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat' })
+        .sendMessage({ message: 'Show the official advisory.' })
+      expect(response.retrievedSources[0].id).toBe('official-2026-001')
+      expect(response.message.sources[0].id).toBe('official-2026-001')
+      expect(response.message.sources[0].id).not.toMatch(/^(?:src-|demo-)/)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('derives the hosted Supabase function endpoint instead of a Pages-relative path', () => {
     expect(resolveChatEndpoint({ supabaseUrl: 'https://project.supabase.co/' }))
       .toBe('https://project.supabase.co/functions/v1/chat')
@@ -254,6 +293,39 @@ describe('ChatService live delivery contract', () => {
       const service = new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat', requestTimeoutMs: 1 })
       await expect(service.sendMessage({ message: 'Schedule' })).rejects.toBeInstanceOf(ChatTimeoutError)
       expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it.each([
+    ['empty assistant content', { id: 'live-3', role: 'assistant', content: '  ', timestamp: new Date().toISOString(), sources: [], festivalYear: 2026 }],
+    ['invalid assistant timestamp', { id: 'live-3', role: 'assistant', content: 'Answer', timestamp: 'not-a-date', sources: [], festivalYear: 2026 }],
+    ['missing response arrays', { id: 'live-3', role: 'assistant', content: 'Answer', timestamp: new Date().toISOString(), sources: [], festivalYear: 2026 }],
+  ])('rejects a live DTO with %s', async (_description, message) => {
+    const originalFetch = globalThis.fetch
+    const payload = { message, retrievedSources: [], retrievedEvents: [], yearResolved: 2026, language: 'en' }
+    if (_description === 'missing response arrays') delete (payload as Partial<typeof payload>).retrievedSources
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(payload))) as typeof fetch
+    try {
+      await expect(new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat' })
+        .sendMessage({ message: 'Schedule' })).rejects.toBeInstanceOf(ChatResponseValidationError)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('drops malformed optional citations while preserving a usable answer', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      message: { id: 'live-4', role: 'assistant', content: 'A usable answer.', timestamp: new Date().toISOString(), sources: [{ id: 1 }], festivalYear: 2026 },
+      retrievedSources: [], retrievedEvents: [], yearResolved: 2026, language: 'en',
+    }))) as typeof fetch
+    try {
+      const response = await new ChatService({ demoMode: false, edgeFunctionUrl: 'https://project.supabase.co/functions/v1/chat' })
+        .sendMessage({ message: 'Schedule' })
+      expect(response.message.sources).toEqual([])
+      expect(response.message.content).toBe('A usable answer.')
     } finally {
       globalThis.fetch = originalFetch
     }

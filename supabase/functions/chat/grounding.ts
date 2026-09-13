@@ -116,6 +116,39 @@ export function isGeneralConversation(query: string): boolean {
   return generalPatterns.some((pattern) => pattern.test(normalized))
 }
 
+/** Greetings and small talk are handled locally so they never depend on retrieval or a provider. */
+export function getLightweightConversationResponse(query: string, language: SupportedLanguage): string | undefined {
+  const normalized = query.toLowerCase().replace(/[!?.,]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/^(hi|hello|hey|good\s+(morning|afternoon|evening)|maayong\s+(buntag|hapon|gabii)|kumusta|kamusta)(\s+(there|buglasan\s+ai))?$/.test(normalized)) {
+    return {
+      en: 'Hello! I can help with verified Buglasan Festival information, such as official schedules, events, and announcements.',
+      ceb: 'Maayong adlaw! Makatabang ko sa beripikadong impormasyon sa Buglasan Festival, sama sa opisyal nga iskedyul, kalihokan, ug mga pahibalo.',
+      fil: 'Kumusta! Makakatulong ako sa beripikadong impormasyon tungkol sa Buglasan Festival, tulad ng opisyal na iskedyul, mga kaganapan, at anunsyo.',
+    }[language]
+  }
+  if (/^(thanks|thank\s+you|salamat|daghang\s+salamat|bye|goodbye|paalam)$/.test(normalized)) {
+    return { en: 'You’re welcome!', ceb: 'Walay sapayan!', fil: 'Walang anuman!' }[language]
+  }
+  if (/^(help|help\s+me|tabang|tabangi\s+ko|tulong|tulungan\s+mo\s+ako|what\s+can\s+you\s+do|how\s+can\s+you\s+help(\s+me)?|what\s+can\s+i\s+ask(\s+you)?)$/.test(normalized)) {
+    return {
+      en: 'I can help with verified Buglasan Festival schedules, events, announcements, and registration information. Ask me about a specific festival year or event.',
+      ceb: 'Makatabang ko sa beripikadong iskedyul, kalihokan, pahibalo, ug impormasyon sa rehistrasyon sa Buglasan Festival. Pangutan-a ko bahin sa piho nga tuig o kalihokan.',
+      fil: 'Makakatulong ako sa beripikadong iskedyul, mga kaganapan, anunsyo, at impormasyon sa pagpaparehistro ng Buglasan Festival. Magtanong tungkol sa isang partikular na taon o kaganapan.',
+    }[language]
+  }
+  return undefined
+}
+
+/** Keep the endpoint within its documented festival-information scope. */
+export function getOutOfScopeResponse(query: string, language: SupportedLanguage): string | undefined {
+  if (isFestivalInformationQuery(query) || isGeneralConversation(query) || getDeterministicHarmlessResponse(query) !== undefined) return undefined
+  return {
+    en: 'I’m Buglasan AI, so I can help with verified Buglasan Festival information such as official schedules, events, announcements, and registrations.',
+    ceb: 'Buglasan AI ko. Makatabang ko sa beripikadong impormasyon sa Buglasan Festival sama sa opisyal nga iskedyul, kalihokan, pahibalo, ug rehistrasyon.',
+    fil: 'Ako ang Buglasan AI. Makakatulong ako sa beripikadong impormasyon tungkol sa Buglasan Festival, tulad ng opisyal na iskedyul, mga kaganapan, anunsyo, at pagpaparehistro.',
+  }[language]
+}
+
 /** Small, deterministic calculations are not festival claims and need no retrieval or provider call. */
 export function getDeterministicHarmlessResponse(query: string): string | undefined {
   const normalized = query.toLowerCase()
@@ -134,6 +167,21 @@ export function getDeterministicHarmlessResponse(query: string): string | undefi
   const right = Number(match[3])
   const result = match[2] === '+' ? left + right : match[2] === '-' ? left - right : match[2] === '*' ? left * right : right === 0 ? undefined : left / right
   return result === undefined || !Number.isFinite(result) ? 'I cannot divide by zero.' : String(result)
+}
+
+export function isTemporalOnlyQuery(query: string): boolean {
+  const normalized = query.toLowerCase().replace(/[?!.,]+/g, ' ').replace(/\s+/g, ' ').trim()
+  return /^(what(?:'s| is)?\s+(?:happening\s+)?|anything\s+)?(?:today|tomorrow|tmrw)$/.test(normalized)
+}
+
+/** A date window is answerable only from canonical event records, not generic source text. */
+export function isEventWindowQuery(query: string): boolean {
+  return /\b(today|tomorrow|tmrw|this\s+week(?:end)?|next\s+week(?:end)?|upcoming|coming\s+(?:up|soon)|happening|events?|activities|schedule|date|when|latest|current)\b/i.test(query)
+}
+
+/** Broad future-discovery language may not contain a proper noun for lexical matching. */
+export function isFutureDiscoveryQuery(query: string): boolean {
+  return /\b(coming\s+up|coming\s+soon|upcoming|what(?:'s|\s+is)\s+(?:happening|on)|anything\s+(?:interesting\s+)?(?:coming\s+up|upcoming))\b/i.test(query)
 }
 
 /**
@@ -171,6 +219,31 @@ export function buildZeroEvidenceFallback(year: number, language: SupportedLangu
   }
 
   return messages[language]
+}
+
+export function buildNoVerifiedEventListingFallback(year: number, language: SupportedLanguage): string {
+  return {
+    en: `No verified Buglasan Festival ${year} event listing matches that time window. Please check the official Buglasan Festival Facebook Page for verified updates: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    ceb: `Walay beripikadong listahan sa kalihokan sa Buglasan Festival ${year} nga motakdo sa maong panahon. Palihog tan-awa ang opisyal nga Buglasan Festival Facebook Page alang sa beripikadong mga update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    fil: `Walang beripikadong listahan ng kaganapan ng Buglasan Festival ${year} na tumutugma sa panahong iyon. Pakitingnan ang opisyal na Buglasan Festival Facebook Page para sa mga beripikadong update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+  }[language]
+}
+
+export function buildTemporaryServiceError(language: SupportedLanguage): string {
+  return {
+    en: 'Buglasan AI is temporarily unavailable. Please try again shortly.',
+    ceb: 'Temporaryong dili magamit ang Buglasan AI. Palihog sulayi pag-usab sa dili madugay.',
+    fil: 'Pansamantalang hindi available ang Buglasan AI. Pakisubukang muli sa ilang sandali.',
+  }[language]
+}
+
+/** Use only when generation failed after trusted, query-relevant evidence was retrieved. */
+export function buildGroundedGenerationFallback(language: SupportedLanguage): string {
+  return {
+    en: 'I found relevant official Buglasan information, but I cannot safely generate a full answer right now. Please review the verified source below or try again shortly.',
+    ceb: 'Nakaplagan ko ang may kalabutan nga opisyal nga impormasyon sa Buglasan, apan dili ko luwas nga makamugna og hingpit nga tubag karon. Palihog susiha ang beripikadong tinubdan sa ubos o sulayi pag-usab sa dili madugay.',
+    fil: 'May nakita akong kaugnay na opisyal na impormasyon tungkol sa Buglasan, ngunit hindi ako ligtas na makakagawa ng buong sagot ngayon. Pakisuri ang beripikadong source sa ibaba o subukang muli sa ilang sandali.',
+  }[language]
 }
 
 /** Server-side wording rule for inclusive calendar-date calculations. */

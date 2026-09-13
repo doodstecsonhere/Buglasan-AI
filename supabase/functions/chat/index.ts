@@ -19,11 +19,20 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { GoogleGenerativeAI } from 'https://esm.sh/@google/generative-ai@0.21.0'
 import {
   buildZeroEvidenceFallback,
+  buildNoVerifiedEventListingFallback,
+  buildGroundedGenerationFallback,
+  buildTemporaryServiceError,
   buildInclusiveDateArithmeticGuidance,
   getLexicalEvidenceTerms,
+  getDeterministicHarmlessResponse,
+  getLightweightConversationResponse,
+  getOutOfScopeResponse,
+  hasUsableEvidence,
+  isEventWindowQuery,
+  isFutureDiscoveryQuery,
+  isTemporalOnlyQuery,
   mapValidatedClaimCitations,
   resolveLanguage,
   shouldUseZeroEvidenceFallback,
@@ -34,7 +43,7 @@ import { generateQueryEmbedding } from '../_shared/embedding.ts'
 import { isAuthorizedDiagnosticRequest } from './authorization.ts'
 import { getGenerationFailure, type GenerationFailure } from './generationDiagnostics.ts'
 import { GENERATION_RETRY_METADATA, type GenerationRetryMetadata } from './generationRetry.ts'
-import { geminiAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
+import { geminiRestAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
 import { generateWithFailover } from '../_shared/providerFailover.ts'
 
 // ============================================
@@ -135,6 +144,7 @@ interface EvidencePacket {
   chunks: ChunkResult[]
   supersessionChains: Record<string, SupersessionChainNode[]>
   queryEmbeddingUsed: boolean
+  retrievalFailed: boolean
   retrievalStats: {
     chunksFound: number
     eventsFound: number
@@ -176,6 +186,7 @@ const secretKey = secretKeys['default']
 
 const PH_TIMEZONE = 'Asia/Manila'
 const CHAT_EXECUTION_TIMEOUT_MS = 40_000
+const PROVIDER_ATTEMPT_TIMEOUT_MS = 7_000
 
 // Context-size caps. These bound what we send to Gemini so we never blow
 // past the model context window or drown the prompt with low-signal results.
@@ -526,6 +537,7 @@ async function retrieveEvidence(
     chunks: [],
     supersessionChains: {},
     queryEmbeddingUsed: false,
+    retrievalFailed: false,
     retrievalStats: { chunksFound: 0, eventsFound: 0, sourcesAfterDedup: 0, chainsExpanded: 0 },
   }
 
@@ -671,6 +683,25 @@ async function retrieveEvidence(
     }
   }
 
+  // Broad future discovery has no proper noun to feed the lexical fallback.
+  // Retrieve only current records for this exact year, then retain only records
+  // that pass the same public citation validation used for generated answers.
+  if (sources.length === 0 && isFutureDiscoveryQuery(query)) {
+    try {
+      const { data, error } = await supabase
+        .from('sources')
+        .select('id, platform, post_id, post_url, published_at, festival_year, raw_text, normalized_text, is_current, status, supersedes_source_id, ingested_at, updated_at')
+        .eq('festival_year', festivalYear)
+        .eq('is_current', true)
+        .in('status', ['active', 'updated', 'postponed'])
+        .order('published_at', { ascending: false })
+        .limit(limits.maxSources)
+      if (!error && Array.isArray(data)) sources = (data as Source[]).filter(isValidCitationSource)
+    } catch (error) {
+      console.warn('Future-discovery source fallback failed:', error)
+    }
+  }
+
   // Step 5: Optionally walk supersession chains. We only do this when the
   // user is asking an explicit correction/lineage question, to avoid extra
   // round-trips on every query.
@@ -702,6 +733,7 @@ async function retrieveEvidence(
     chunks: rankedChunks,
     supersessionChains,
     queryEmbeddingUsed: embedding !== null,
+    retrievalFailed: Boolean(chunksRes?.error || eventsRes?.error),
     retrievalStats: {
       chunksFound: usefulChunks.length,
       eventsFound: rawEvents.length,
@@ -899,6 +931,25 @@ serve(async (req) => {
       })
     }
 
+    const harmlessResponse = getDeterministicHarmlessResponse(message)
+    if (harmlessResponse !== undefined) {
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: harmlessResponse, timestamp: new Date().toISOString(), sources: [], festivalYear: festivalYear || getCurrentFestivalYear() },
+        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: festivalYear || getCurrentFestivalYear(), language,
+      }
+      return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    const lightweightResponse = getLightweightConversationResponse(message, language) ?? getOutOfScopeResponse(message, language)
+    if (lightweightResponse !== undefined) {
+      const resolved = festivalYear || getCurrentFestivalYear()
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: lightweightResponse, timestamp: new Date().toISOString(), sources: [], festivalYear: resolved },
+        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolved, language,
+      }
+      return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
     const supabase = createClient(SUPABASE_URL, secretKey)
     // ---- Year resolution (Phase 3) ----
     const defaultYear = festivalYear || getCurrentFestivalYear()
@@ -942,7 +993,23 @@ serve(async (req) => {
     // Factual festival questions must never reach the generative model when
     // retrieval produced no usable official evidence. General conversation
     // remains model-handled even without evidence.
-    if (!diagnostic && shouldUseZeroEvidenceFallback(message, evidence)) {
+    if (!diagnostic && evidence.retrievalFailed) {
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: buildTemporaryServiceError(language), timestamp: new Date().toISOString(), sources: [], festivalYear: resolvedYear },
+        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolvedYear, language,
+      }
+      return new Response(JSON.stringify(response), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (!diagnostic && isEventWindowQuery(message) && evidence.events.length === 0) {
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: buildNoVerifiedEventListingFallback(resolvedYear, language), timestamp: new Date().toISOString(), sources: [], festivalYear: resolvedYear },
+        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolvedYear, language,
+      }
+      return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (!diagnostic && (shouldUseZeroEvidenceFallback(message, evidence) || (isTemporalOnlyQuery(message) && !hasUsableEvidence(evidence)))) {
       const response: ChatResponse = {
         message: {
           id: crypto.randomUUID(),
@@ -964,9 +1031,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     // Build context sections
     const sourcesContext = formatSourcesForPrompt(evidence.sources)
@@ -1037,9 +1101,9 @@ ${buildInclusiveDateArithmeticGuidance(language)}
 
     let result
     try {
-      const primary = geminiAdapter(GEMINI_MODEL, async (requestPrompt) => (await model.generateContent(requestPrompt)).response.text())
+      const primary = geminiRestAdapter(GEMINI_API_KEY, GEMINI_MODEL)
       const generated = await responseWithTimeout(
-        generateWithFailover({ prompt }, primary, configuredSecondaryAdapter(), (text) => text),
+        generateWithFailover({ prompt }, primary, configuredSecondaryAdapter(), (text) => text, { attemptTimeoutMs: PROVIDER_ATTEMPT_TIMEOUT_MS }),
         CHAT_EXECUTION_TIMEOUT_MS,
       )
       result = { response: { text: () => generated.value } }
@@ -1047,7 +1111,15 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     } catch (error) {
       const retryMetadata = error && typeof error === 'object' ? (error as Record<symbol, unknown>)[GENERATION_RETRY_METADATA] as Partial<GenerationRetryMetadata> | undefined : undefined
       if (diagnostic) diagnostic.generation = { succeeded: false, failure: getGenerationFailure(error), ...retryMetadata }
-      throw error
+      const hasEvidence = hasUsableEvidence(evidence)
+      const fallback = hasEvidence
+        ? ensureTrustedCitations(buildGroundedGenerationFallback(language), evidence.sources)
+        : { responseText: buildTemporaryServiceError(language), citations: [], claims: [] }
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: fallback.responseText, timestamp: new Date().toISOString(), sources: fallback.citations, claimCitations: fallback.claims, festivalYear: resolvedYear },
+        retrievedSources: evidence.sources, retrievedEvents: evidence.events, retrievedChunks: evidence.chunks, yearResolved: resolvedYear, language,
+      }
+      return new Response(JSON.stringify(response), { status: hasEvidence ? 200 : 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     if (diagnostic) {
@@ -1056,7 +1128,10 @@ ${buildInclusiveDateArithmeticGuidance(language)}
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    const generatedText = result.response.text()
+    const providerText = result.response.text()
+    const generatedText = typeof providerText === 'string' && providerText.trim()
+      ? providerText.trim()
+      : buildTemporaryServiceError(language)
     const { responseText, citations, claims } = ensureTrustedCitations(generatedText, evidence.sources)
 
     const response: ChatResponse = {
