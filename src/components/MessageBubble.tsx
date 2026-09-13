@@ -79,11 +79,33 @@ export function renderCitedContent(content: unknown, sources: unknown) {
 export function renderMarkdownText(text: string): ReactNode[] {
   return text.split(/(\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*))/g).map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>
+      return <strong key={index}>{renderSafeLinks(part.slice(2, -2), `bold-${index}`)}</strong>
     }
     if (part.startsWith('*') && part.endsWith('*')) {
-      return <em key={index}>{part.slice(1, -1)}</em>
+      return <em key={index}>{renderSafeLinks(part.slice(1, -1), `italic-${index}`)}</em>
     }
-    return part
+    return renderSafeLinks(part, `text-${index}`)
   })
+}
+
+/** Render valid http(s) URLs as links without parsing or injecting HTML. */
+export function renderSafeLinks(text: string, keyPrefix = 'url'): ReactNode | ReactNode[] {
+  if (!/(https?:\/\/[^\s<]+)/.test(text)) return text
+  return text.split(/(https?:\/\/[^\s<]+)/g).map((part, index) => {
+    if (index % 2 === 0) return part
+    const match = part.match(/^(.*?)([.,!?;:]+)?$/)
+    const candidate = match?.[1] ?? part
+    const punctuation = match?.[2] ?? ''
+    if (!isSafeHttpUrl(candidate)) return part
+    return <span key={`${keyPrefix}-${index}`}><a href={candidate} target="_blank" rel="noopener noreferrer" className="text-brand-blue underline underline-offset-2 hover:text-blue-800">{candidate}</a>{punctuation}</span>
+  })
+}
+
+function isSafeHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.hostname
+  } catch {
+    return false
+  }
 }

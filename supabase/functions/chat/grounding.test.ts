@@ -6,6 +6,7 @@ const assertEquals = (actual: unknown, expected: unknown): void => {
 import {
   buildInclusiveDateArithmeticGuidance,
   buildNoVerifiedEventListingFallback,
+  buildNoVerifiedAnnouncementFallback,
   buildRecoverableFailureFallback,
   buildZeroEvidenceFallback,
   buildGroundedGenerationFallback,
@@ -18,6 +19,7 @@ import {
   isFestivalInformationQuery,
   isTemporalOnlyQuery,
   isEventWindowQuery,
+  isAnnouncementQuery,
   mapValidatedClaimCitations,
   isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
@@ -64,10 +66,17 @@ Deno.test('grounding: Pandanyag is retained as an exact-year lexical retrieval t
   assertEquals(getLexicalEvidenceTerms('Which LGU has the Pandanyag Festival in 2026?'), ['pandanyag'])
 })
 
-Deno.test('grounding: harmless arithmetic is deterministic and bypasses factual handling', () => {
+Deno.test('grounding: arithmetic parser is not a public scope bypass', () => {
   assertEquals(getDeterministicHarmlessResponse('2 + 2'), '4')
   assertEquals(getDeterministicHarmlessResponse('whats 2 plus 2'), '4')
   assertEquals(getDeterministicHarmlessResponse('2 / 0'), 'I cannot divide by zero.')
+})
+
+Deno.test('grounding: unrelated math, knowledge, and code prompts are scope-guarded before retrieval', () => {
+  for (const query of ['23 plus 76', 'square root 52', 'What is the capital of France?', 'How do I write a JavaScript loop?']) {
+    assertEquals(isFestivalInformationQuery(query), false)
+    assertEquals(getOutOfScopeResponse(query, 'en')?.includes('Buglasan AI'), true)
+  }
 })
 
 Deno.test('grounding: standalone tomorrow is temporal-only and broad discovery is recognized', () => {
@@ -83,6 +92,11 @@ Deno.test('grounding: production acceptance temporal and latest prompts remain g
   const latestFallback = buildZeroEvidenceFallback(2026, 'en')
   assertEquals(latestFallback.includes('No verified current official Buglasan Festival 2026 information matches this request'), true)
   assertEquals(latestFallback.includes('https://www.facebook.com/Buglasan'), true)
+  for (const query of ["What's the latest update?", 'latest announcement', 'current announcement']) {
+    assertEquals(isAnnouncementQuery(query), true)
+    assertEquals(isEventWindowQuery(query), false)
+  }
+  assertEquals(buildNoVerifiedAnnouncementFallback(2026, 'en').includes('announcement is available'), true)
 })
 
 Deno.test('grounding: greetings and unrelated questions bypass retrieval with deterministic responses', () => {

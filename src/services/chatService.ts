@@ -15,6 +15,7 @@
 
 import type { Source, Event, FestivalYear, SourceCitation, ClaimCitation, ChatLanguage } from '../types'
 import { resolveFestivalYear, getCurrentFestivalYear } from '../utils/dateUtils'
+import { answerOffline, saveVerifiedKnowledge } from './offlineKnowledge'
 
 const DEMO_MODE = import.meta.env.MODE === 'test' || __DEMO_BUILD__
 const loadDemoRuntime = DEMO_MODE ? () => import('./demoChatRuntime') : null
@@ -224,11 +225,17 @@ class ChatService {
     const resolved = resolveFestivalYear(request.message, request.festivalYear)
     const festivalYear = resolved.festivalYear
 
+    // Test/demo fixtures intentionally run without a network navigator; offline
+    // product routing applies only to the live production client.
+    if (!DEMO_MODE && typeof navigator !== 'undefined' && navigator.onLine === false) return answerOffline(request, festivalYear)
+
     if (DEMO_MODE && this.demoMode) {
       return this.sendMessageDemo(request, festivalYear)
     }
 
-    return this.sendMessageLive(request)
+    const response = await this.sendMessageLive(request)
+    void saveVerifiedKnowledge(response)
+    return response
   }
 
   // ===========================================================================

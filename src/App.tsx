@@ -68,7 +68,6 @@ function App() {
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return
-    if (!isOnline) { setErrorMessage('You are offline. Reconnect to send a question; your saved conversation is still available.'); return }
     setErrorMessage(null)
     const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), timestamp: new Date() }
     const history = [...messages, userMessage]
@@ -90,7 +89,7 @@ function App() {
       persistMessages([...history, { id: crypto.randomUUID(), role: 'assistant', content: failure, timestamp: new Date(), sources: [] }], originThreadId, false)
       setErrorMessage(failure)
     } finally { if (requestControllerRef.current === requestController) requestControllerRef.current = null; setIsLoading(false) }
-  }, [activeThreadId, chatLanguage, festivalYear, isLoading, isOnline, messages, persistMessages])
+  }, [activeThreadId, chatLanguage, festivalYear, isLoading, messages, persistMessages])
 
   const newChat = useCallback(() => { requestControllerRef.current?.abort(); activeThreadRef.current = ''; setActiveThreadId(''); setMessages([]); setErrorMessage(null); setHistoryOpen(false); window.setTimeout(() => composerRef.current?.focus(), 0) }, [])
   const selectThread = useCallback((id: string) => { const thread = threads.find(item => item.id === id); if (thread) { activeThreadRef.current = id; setActiveThreadId(id); setMessages(thread.messages); setHistoryOpen(false) } }, [threads])
@@ -106,11 +105,11 @@ function App() {
       <ChatHistoryDrawer threads={threads} activeThreadId={activeThreadId} open={historyOpen} onClose={() => setHistoryOpen(false)} onNew={newChat} onSelect={selectThread} onDelete={deleteThread} />
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="app-header"><div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button onClick={() => setHistoryOpen(true)} className="icon-button md:hidden" aria-label="Open chat history">☰</button><div className="min-w-0"><p className="brand-name">BUGLASAN AI</p><h1 className="truncate text-base font-bold sm:text-lg">Your Festival Guide</h1></div></div>{installPrompt && !installDismissed && !isStandalone && <button type="button" className="install-button" onClick={installApp}>Install App</button>}</div></header>
-        {!isOnline && <p className="bg-fiesta-yellow-light px-4 py-2 text-center text-sm font-medium text-slate-800" role="status">You’re offline. Saved chats remain available.</p>}
+        {!isOnline && <p className="bg-fiesta-yellow-light px-4 py-2 text-center text-sm font-medium text-slate-800" role="status">You’re offline. Buglasan AI can answer from verified cached information on this device.</p>}
         <div className={`conversation-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6${messages.length === 0 ? ' is-empty' : ''}`} aria-live="polite"><div className="mx-auto w-full max-w-4xl"><ChatInterface messages={messages} isLoading={isLoading} messagesEndRef={messagesEndRef} /></div></div>
         {errorMessage && <div className="mx-auto w-full max-w-3xl px-4 pb-2 sm:px-6"><div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"><span>{errorMessage}</span><button type="button" onClick={() => setErrorMessage(null)} className="rounded px-2 py-1 font-semibold hover:bg-red-100">Dismiss</button></div></div>}
-        {messages.length === 0 && <div className="mx-auto w-full max-w-4xl px-4 pb-3 sm:px-6"><div className="suggestions" aria-label="Common questions">{quickQuestions.map(question => <button key={question} onClick={() => handleSendMessage(question)} disabled={isLoading || !isOnline} className="suggestion disabled:opacity-50">{question}</button>)}</div></div>}
-        <div className="composer-dock"><div className="mx-auto w-full max-w-4xl"><MessageInput inputRef={composerRef} onSend={handleSendMessage} disabled={isLoading || !isOnline} placeholder="Ask about Buglasan Festival..." /></div></div>
+        {messages.length === 0 && <div className="mx-auto w-full max-w-4xl px-4 pb-3 sm:px-6"><div className="suggestions" aria-label="Common questions">{quickQuestions.map(question => <button key={question} onClick={() => handleSendMessage(question)} disabled={isLoading} className="suggestion disabled:opacity-50">{question}</button>)}</div></div>}
+        <div className="composer-dock"><div className="mx-auto w-full max-w-4xl"><MessageInput inputRef={composerRef} onSend={handleSendMessage} disabled={isLoading} placeholder="Ask about Buglasan Festival..." /></div></div>
       </main>
     </div>
     <AIDisclaimer />

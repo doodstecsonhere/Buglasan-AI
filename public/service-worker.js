@@ -1,4 +1,4 @@
-const CACHE_NAME = 'buglasan-ai-shell-v4-branding'
+const CACHE_NAME = 'buglasan-ai-shell-v5-offline-knowledge'
 const APP_SHELL = [
   '/',
   '/index.html',

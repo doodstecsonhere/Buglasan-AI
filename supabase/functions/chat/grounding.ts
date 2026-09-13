@@ -141,7 +141,7 @@ export function getLightweightConversationResponse(query: string, language: Supp
 
 /** Keep the endpoint within its documented festival-information scope. */
 export function getOutOfScopeResponse(query: string, language: SupportedLanguage): string | undefined {
-  if (isFestivalInformationQuery(query) || isGeneralConversation(query) || getDeterministicHarmlessResponse(query) !== undefined) return undefined
+  if (isFestivalInformationQuery(query) || isGeneralConversation(query)) return undefined
   return {
     en: 'I’m Buglasan AI, so I can help with verified Buglasan Festival information such as official schedules, events, announcements, and registrations.',
     ceb: 'Buglasan AI ko. Makatabang ko sa beripikadong impormasyon sa Buglasan Festival sama sa opisyal nga iskedyul, kalihokan, pahibalo, ug rehistrasyon.',
@@ -149,7 +149,11 @@ export function getOutOfScopeResponse(query: string, language: SupportedLanguage
   }[language]
 }
 
-/** Small, deterministic calculations are not festival claims and need no retrieval or provider call. */
+/**
+ * Retained only as a parser seam for tests and future festival-specific date
+ * arithmetic. General calculations must still be rejected by the scope guard;
+ * callers must never use this result as a public response.
+ */
 export function getDeterministicHarmlessResponse(query: string): string | undefined {
   const normalized = query.toLowerCase()
     .replace(/[?=]/g, ' ')
@@ -176,7 +180,21 @@ export function isTemporalOnlyQuery(query: string): boolean {
 
 /** A date window is answerable only from canonical event records, not generic source text. */
 export function isEventWindowQuery(query: string): boolean {
-  return /\b(today|tomorrow|tmrw|this\s+week(?:end)?|next\s+week(?:end)?|upcoming|coming\s+(?:up|soon)|happening|events?|activities|schedule|date|when|latest|current)\b/i.test(query)
+  return /\b(today|tomorrow|tmrw|this\s+week(?:end)?|next\s+week(?:end)?|upcoming|coming\s+(?:up|soon)|happening|events?|activities|schedule|date|when)\b/i.test(query) &&
+    !isAnnouncementQuery(query)
+}
+
+/** Announcements are source/update questions, not requests for event rows. */
+export function isAnnouncementQuery(query: string): boolean {
+  return /\b(latest|current|new(?:est)?|recent)\s+(?:official\s+)?(?:update|announcement|advisory|notice)|\b(?:latest|current)\b.*\b(?:update|announcement|advisory|notice)\b/i.test(query)
+}
+
+export function buildNoVerifiedAnnouncementFallback(year: number, language: SupportedLanguage): string {
+  return {
+    en: `No verified current official Buglasan Festival ${year} announcement is available in this response. Please check the official Buglasan Festival Facebook Page for the latest verified update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    ceb: `Walay beripikadong kasamtangang opisyal nga pahibalo sa Buglasan Festival ${year} nga available sa kini nga tubag. Palihog tan-awa ang opisyal nga Buglasan Festival Facebook Page alang sa pinakabag-ong beripikadong update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    fil: `Walang available na beripikadong kasalukuyang opisyal na anunsyo para sa Buglasan Festival ${year} sa tugon na ito. Pakitingnan ang opisyal na Buglasan Festival Facebook Page para sa pinakabagong beripikadong update: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+  }[language]
 }
 
 /** Broad future-discovery language may not contain a proper noun for lexical matching. */

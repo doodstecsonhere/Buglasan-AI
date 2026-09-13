@@ -27,9 +27,10 @@ import {
   buildTemporaryServiceError,
   buildInclusiveDateArithmeticGuidance,
   getLexicalEvidenceTerms,
-  getDeterministicHarmlessResponse,
   getLightweightConversationResponse,
   getOutOfScopeResponse,
+  isAnnouncementQuery,
+  buildNoVerifiedAnnouncementFallback,
   hasUsableEvidence,
   isEventWindowQuery,
   isFutureDiscoveryQuery,
@@ -932,15 +933,6 @@ serve(async (req) => {
       })
     }
 
-    const harmlessResponse = getDeterministicHarmlessResponse(message)
-    if (harmlessResponse !== undefined) {
-      const response: ChatResponse = {
-        message: { id: crypto.randomUUID(), role: 'assistant', content: harmlessResponse, timestamp: new Date().toISOString(), sources: [], festivalYear: festivalYear || getCurrentFestivalYear() },
-        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: festivalYear || getCurrentFestivalYear(), language,
-      }
-      return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-    }
-
     const lightweightResponse = getLightweightConversationResponse(message, language) ?? getOutOfScopeResponse(message, language)
     if (lightweightResponse !== undefined) {
       const resolved = festivalYear || getCurrentFestivalYear()
@@ -1002,6 +994,14 @@ serve(async (req) => {
         retrievedSources: evidence.sources, retrievedEvents: evidence.events, retrievedChunks: evidence.chunks, yearResolved: resolvedYear, language,
       }
       return new Response(JSON.stringify(response), { status: hasEvidence ? 200 : 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (!diagnostic && isAnnouncementQuery(message) && !hasUsableEvidence(evidence)) {
+      const response: ChatResponse = {
+        message: { id: crypto.randomUUID(), role: 'assistant', content: buildNoVerifiedAnnouncementFallback(resolvedYear, language), timestamp: new Date().toISOString(), sources: [], festivalYear: resolvedYear },
+        retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolvedYear, language,
+      }
+      return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     if (!diagnostic && isEventWindowQuery(message) && evidence.events.length === 0) {

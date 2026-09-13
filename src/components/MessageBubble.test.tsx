@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
-import { renderCitedContent, renderMarkdownText } from './MessageBubble'
+import { renderCitedContent, renderMarkdownText, renderSafeLinks } from './MessageBubble'
 import type { SourceCitation } from '../types'
 
 describe('MessageBubble response rendering', () => {
@@ -72,5 +72,19 @@ describe('MessageBubble response rendering', () => {
     const fallback = element(rendered[0])
     expect(fallback.type).toBe('span')
     expect(fallback.props.children).toContain('Unable to display this message.')
+  })
+
+  it('renders an official Facebook fallback URL as a safe anchor and preserves sentence punctuation', () => {
+    const rendered = renderSafeLinks('See https://www.facebook.com/Buglasan.') as ReactElement[]
+    const wrapper = element(rendered[1])
+    const children = wrapper.props.children as unknown as ReactElement[]
+    expect(element(children[0]).type).toBe('a')
+    expect(element(children[0]).props.href).toBe('https://www.facebook.com/Buglasan')
+    expect(element(children[0]).props.children).toBe('https://www.facebook.com/Buglasan')
+    expect(children[1]).toBe('.')
+  })
+
+  it('keeps a malformed URL as text', () => {
+    expect(renderSafeLinks('Not a link: https://')).toBe('Not a link: https://')
   })
 })
