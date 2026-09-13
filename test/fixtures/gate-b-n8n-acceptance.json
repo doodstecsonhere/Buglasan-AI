@@ -1,0 +1,45 @@
+{
+  "fixtureFamily": "pipeline-test-",
+  "fixtureMarker": "phase9-v1",
+  "source": {
+    "platform": "facebook",
+    "post_id": "pipeline-test-10-canonical",
+    "post_url": "https://www.facebook.com/NegrosOrientalProvincialGovernment/posts/pipeline-test-10-canonical",
+    "published_at": "2027-09-10T08:00:00+08:00",
+    "post_year": 2027,
+    "festival_year": 2027,
+    "raw_text": "Buglasan Pipeline Canonical 2027 is confirmed on October 22, 2027 at 6:00 PM at Freedom Park.",
+    "normalized_text": "Buglasan Pipeline Canonical 2027 is confirmed on October 22, 2027 at 6:00 PM at Freedom Park.",
+    "title": "pipeline-test-10-canonical",
+    "source_type": "text",
+    "media_urls": [],
+    "collected_at": "2027-09-10T00:00:00.000Z",
+    "collection_method": "manual",
+    "source_metadata": {
+      "pipeline_acceptance_fixture": "phase9-v1",
+      "acceptance": true,
+      "gate_b_n8n_acceptance": "synthetic-only"
+    }
+  },
+  "textlessSource": {
+    "platform": "facebook",
+    "post_id": "pipeline-test-06-textless",
+    "post_url": "https://www.facebook.com/NegrosOrientalProvincialGovernment/posts/pipeline-test-06-textless",
+    "published_at": "2027-09-06T08:00:00+08:00",
+    "post_year": 2027,
+    "festival_year": null,
+    "raw_text": null,
+    "normalized_text": null,
+    "title": "pipeline-test-06-textless",
+    "source_type": "image",
+    "media_urls": ["https://example.invalid/gate-b-textless.png"],
+    "collected_at": "2027-09-06T00:00:00.000Z",
+    "collection_method": "manual",
+    "source_metadata": {
+      "pipeline_acceptance_fixture": "phase9-v1",
+      "acceptance": true,
+      "gate_b_n8n_acceptance": "synthetic-only",
+      "evidence": "synthetic image-only boundary"
+    }
+  }
+}

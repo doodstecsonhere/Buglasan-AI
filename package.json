@@ -40,6 +40,8 @@
     "pipeline:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --acceptance",
     "pipeline:diagnostic-chat": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --diagnostic-chat",
     "pipeline:cleanup": "node --experimental-strip-types scripts/orchestration-live.ts --cleanup"
+    ,"gate-b:n8n:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --acceptance"
+    ,"gate-b:n8n:cleanup": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --cleanup"
   },
   "dependencies": {
     "react": "^19.2.8",

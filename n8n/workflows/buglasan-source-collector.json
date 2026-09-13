@@ -10,7 +10,7 @@
       "position": [-720, 0],
       "credentials": {
         "httpHeaderAuth": {
-          "id": "buglasan-source-collector-header-auth",
+          "id": "configure-after-import",
           "name": "Buglasan Source Collector Header Auth"
         }
       },
