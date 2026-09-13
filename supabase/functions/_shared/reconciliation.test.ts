@@ -1,5 +1,5 @@
 import { assertEquals, assert } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { compareCandidate, gateComparisons, hasCreationEvidence, isRetryableGeminiStatus, normalizeReconciliationText, parseGeminiClassification, rankShortlist, type Candidate, type CanonicalTarget } from './reconciliation.ts'
+import { compareCandidate, gateComparisons, hasCreationEvidence, hasPlausibleExistingTarget, isRetryableGeminiStatus, normalizeReconciliationText, parseGeminiClassification, rankShortlist, type Candidate, type CanonicalTarget } from './reconciliation.ts'
 
 const candidate = (overrides: Partial<Candidate> = {}): Candidate => ({
   id: 'candidate', event_name: 'Buglasan Opening!', festival_year: 2026, start_datetime: '2026-10-15T18:00:00+08:00', venue: 'Freedom Park', organizer: 'Province', category: 'ceremony', extracted_source_id: 'source', source_fingerprint: 'fingerprint', extraction_identity: 'identity', extractor_version: 'phase6-v1', candidate_index: 0, extraction_evidence: [{ field: 'event_name', excerpt: 'Buglasan Opening' }, { field: 'start_datetime', locator: 'line:1' }], ...overrides,
@@ -36,6 +36,11 @@ Deno.test('reconciliation: creation requires name plus temporal or venue/organiz
   assert(hasCreationEvidence(candidate()))
   assertEquals(hasCreationEvidence(candidate({ extraction_evidence: [{ field: 'event_name', excerpt: 'Opening' }] })), false)
   assertEquals(hasCreationEvidence(candidate({ extraction_evidence: [{ field: 'venue', locator: 'line:3' }] })), false)
+})
+
+Deno.test('reconciliation: weak incidental candidates do not block creation, but plausible identities do', () => {
+  assertEquals(hasPlausibleExistingTarget([{ target_id: 'other', name_exact: false, name_token_overlap_bp: 2500, date_relation: 'same_day', venue_exact: true, organizer_exact: false, category_equal: true, source_lineage: 'unrelated' }]), false)
+  assertEquals(hasPlausibleExistingTarget([{ target_id: 'other', name_exact: false, name_token_overlap_bp: 5000, date_relation: 'same_day', venue_exact: true, organizer_exact: false, category_equal: true, source_lineage: 'unrelated' }]), true)
 })
 
 Deno.test('reconciliation: malformed or out-of-shortlist Gemini answers fail closed and provider statuses classify safely', () => {

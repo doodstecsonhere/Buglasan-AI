@@ -8,18 +8,18 @@ process.loadEnvFile('.env.local')
 const prefix = 'reconciliation-test-'
 const fixtureIds = ['reconciliation-test-01-create', 'reconciliation-test-02-identical', 'reconciliation-test-03-reschedule', 'reconciliation-test-04-cancellation', 'reconciliation-test-05-conflicting-date', 'reconciliation-test-06-distinct', 'reconciliation-test-07-registration-extension', 'reconciliation-test-08-venue-change', 'reconciliation-test-09-postponement', 'reconciliation-test-10-new-schedule', 'reconciliation-test-11-null-year', 'reconciliation-test-12-replay'] as const
 const sourceText: Record<(typeof fixtureIds)[number], string> = {
-  'reconciliation-test-01-create': 'Buglasan Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
-  'reconciliation-test-02-identical': 'Buglasan Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
-  'reconciliation-test-03-reschedule': 'Buglasan Lantern Parade 2027 is rescheduled to October 20, 2027 at 6:00 PM.',
-  'reconciliation-test-04-cancellation': 'Buglasan Lantern Parade 2027 is cancelled due to weather.',
-  'reconciliation-test-05-conflicting-date': 'Buglasan Lantern Parade 2027 is on October 25, 2027 at 6:00 PM.',
-  'reconciliation-test-06-distinct': 'Buglasan Riverside Parade 2027 is confirmed on October 20, 2027 at 6:00 PM at Riverside Park.',
-  'reconciliation-test-07-registration-extension': 'Registration for Buglasan Lantern Parade 2027 at Freedom Park on October 18, 2027 at 6:00 PM is extended until October 10, 2027 at 11:59 PM.',
-  'reconciliation-test-08-venue-change': 'Buglasan Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Provincial Convention Center.',
-  'reconciliation-test-09-postponement': 'Buglasan Lantern Parade 2027 is postponed due to weather. A new date will be announced.',
-  'reconciliation-test-10-new-schedule': 'Buglasan Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park after postponement.',
-  'reconciliation-test-11-null-year': 'Buglasan Lantern Parade is confirmed on October 18 at 6:00 PM at Freedom Park.',
-  'reconciliation-test-12-replay': 'Buglasan Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
+  'reconciliation-test-01-create': 'Gate A Synthetic Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
+  'reconciliation-test-02-identical': 'Gate A Synthetic Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
+  'reconciliation-test-03-reschedule': 'Gate A Synthetic Lantern Parade 2027 is rescheduled to October 20, 2027 at 6:00 PM.',
+  'reconciliation-test-04-cancellation': 'Gate A Synthetic Lantern Parade 2027 is cancelled due to weather.',
+  'reconciliation-test-05-conflicting-date': 'Gate A Synthetic Lantern Parade 2027 is on October 25, 2027 at 6:00 PM.',
+  'reconciliation-test-06-distinct': 'Gate A Synthetic Riverside Parade 2027 is confirmed on October 20, 2027 at 6:00 PM at Riverside Park.',
+  'reconciliation-test-07-registration-extension': 'Registration for Gate A Synthetic Lantern Parade 2027 at Freedom Park on October 18, 2027 at 6:00 PM is extended until October 10, 2027 at 11:59 PM.',
+  'reconciliation-test-08-venue-change': 'Gate A Synthetic Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Provincial Convention Center.',
+  'reconciliation-test-09-postponement': 'Gate A Synthetic Lantern Parade 2027 is postponed due to weather. A new date will be announced.',
+  'reconciliation-test-10-new-schedule': 'Gate A Synthetic Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park after postponement.',
+  'reconciliation-test-11-null-year': 'Gate A Synthetic Lantern Parade is confirmed on October 18 at 6:00 PM at Freedom Park.',
+  'reconciliation-test-12-replay': 'Gate A Synthetic Lantern Parade 2027 is confirmed on October 18, 2027 at 6:00 PM at Freedom Park.',
 }
 const url = process.env.SUPABASE_URL
 const expectedRef = process.env.SUPABASE_EXPECTED_PROJECT_REF

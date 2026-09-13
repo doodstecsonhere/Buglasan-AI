@@ -1,5 +1,5 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
-import { RECONCILER_VERSION, compareCandidate, gateComparisons, hasCreationEvidence, isRetryableGeminiStatus, parseGeminiClassification, rankShortlist, type Candidate, type CanonicalTarget } from '../_shared/reconciliation.ts'
+import { RECONCILER_VERSION, compareCandidate, gateComparisons, hasCreationEvidence, hasPlausibleExistingTarget, isRetryableGeminiStatus, parseGeminiClassification, rankShortlist, type Candidate, type CanonicalTarget } from '../_shared/reconciliation.ts'
 
 const URL = Deno.env.get('SUPABASE_URL') ?? ''
 const KEY = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default ?? ''
@@ -57,11 +57,14 @@ serve(async (request: Request) => {
       const target = targets.find((item) => item.id === gate.target_id)!; const snapshot = { ...target.current_version, status: target.lifecycle_status }
       const fields = evidenceFor(candidate, snapshot)
       outcome = fields.length ? { action: 'unchanged', reason: 'deterministic_identical_snapshot', canonical_event_id: target.id, ...base, field_evidence: fields } : { action: 'needs_review', reason: 'invalid_evidence', ...base }
-    } else if (!ranked.length && hasCreationEvidence(candidate)) {
+    } else if (!hasPlausibleExistingTarget(ranked) && hasCreationEvidence(candidate)) {
       const snapshot = { event_name: candidate.event_name, aliases: candidate.aliases ?? [], description: candidate.description ?? null, category: candidate.category ?? null, start_datetime: candidate.start_datetime ?? null, end_datetime: candidate.end_datetime ?? null, venue: candidate.venue ?? null, organizer: candidate.organizer ?? null, deadline: candidate.deadline ?? null, eligibility: candidate.eligibility ?? null, fees: candidate.fees ?? null, contact_info: candidate.contact_info ?? null, status: candidate.status === 'confirmed' ? 'confirmed' : 'scheduled' }
       const fields = evidenceFor(candidate, snapshot); outcome = fields.length >= 2 ? { action: 'create', reason: 'minimum_creation_evidence', ...base, gate: { ...gate, passes: true }, snapshot, change_kind: 'initial', field_evidence: fields } : { action: 'needs_review', reason: 'invalid_evidence', ...base }
     } else {
-      const gemini = ranked.length > 1 ? await classifyAmbiguity(ranked) : null
+      // Only genuinely plausible identity candidates may consume the optional
+      // ambiguity classifier; unrelated shortlist noise must remain deterministic.
+      const ambiguous = ranked.filter((item) => item.name_exact || item.name_token_overlap_bp >= 5000)
+      const gemini = ambiguous.length > 1 ? await classifyAmbiguity(ambiguous) : null
       outcome = { action: 'needs_review', reason: gemini ? 'gemini_ambiguity' : ranked.length ? 'gate_failed' : 'insufficient_create_evidence', ...base, gemini }
     }
     const inputHash = await sha256({ candidate_id: candidate.id, extraction_identity: candidate.extraction_identity, shortlist, gate })

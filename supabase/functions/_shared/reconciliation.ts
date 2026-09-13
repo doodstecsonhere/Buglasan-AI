@@ -40,6 +40,11 @@ export function hasCreationEvidence(candidate: Candidate): boolean {
   return fields.has('event_name') && (fields.has('start_datetime') || fields.has('end_datetime') || fields.has('venue') || fields.has('organizer'))
 }
 
+/** A weak incidental shortlist entry must not suppress a fully evidenced new event. */
+export function hasPlausibleExistingTarget(comparisons: Comparison[]): boolean {
+  return comparisons.some((comparison) => comparison.name_exact || comparison.name_token_overlap_bp >= 5000)
+}
+
 export type GeminiClassification = { decision: 'needs_review' | 'choose_target_id' | 'create'; target_id: string | null; rationale: string }
 export function parseGeminiClassification(value: unknown, allowedTargetIds: readonly string[]): GeminiClassification | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
