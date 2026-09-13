@@ -38,7 +38,7 @@
 --       status IN ('active', 'updated', 'postponed').
 --
 --   events.status  = 'postponed'  →  events.is_current = FALSE
---       The event is NO LONGER actively scheduled. It must be excluded from
+--       The postponed event is not actively scheduled. It must be excluded from
 --       "upcoming events" lists and from primary retrieval. A fresh event
 --       row (status = 'scheduled' or 'confirmed') with the new date is what
 --       represents the now-scheduled event — the postponed row is history.
