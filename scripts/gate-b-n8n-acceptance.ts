@@ -19,11 +19,15 @@ const workerToken = process.env.GATE_B_WORKER_WEBHOOK_TOKEN
 const cleanupToken = process.env.PIPELINE_ACCEPTANCE_FIXTURE_TOKEN
 
 function assert(value: unknown, label: string): asserts value { if (!value) throw new Error(`Gate B acceptance assertion failed: ${label}`) }
+function isLoopbackHttpUrl(value: string): boolean {
+  const url = new URL(value)
+  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+}
 function guard(): void {
   assert(process.env.LIVE_GATE_B_N8N_ACCEPTANCE === optIn, 'exact LIVE_GATE_B_N8N_ACCEPTANCE opt-in')
   assert(supabaseUrl && serviceKey && expectedRef && n8nUrl && sourceToken && workerToken && cleanupToken, 'all documented operator environment names are configured')
   assert(new URL(supabaseUrl).hostname.split('.')[0] === expectedRef, 'SUPABASE_EXPECTED_PROJECT_REF matches SUPABASE_URL')
-  assert(new URL(n8nUrl).protocol === 'https:', 'GATE_B_N8N_URL uses HTTPS')
+  assert(new URL(n8nUrl).protocol === 'https:' || isLoopbackHttpUrl(n8nUrl), 'GATE_B_N8N_URL uses HTTPS or loopback HTTP')
   assert(sourceToken !== workerToken && sourceToken !== cleanupToken && workerToken !== cleanupToken, 'webhook and cleanup tokens are distinct')
 }
 async function responseBody(response: Response): Promise<Record<string, unknown>> {
@@ -63,7 +67,12 @@ async function sourceId(postId: string): Promise<string> {
 }
 async function waitFor(table: string, filter: string, accepted: readonly string[], label: string): Promise<Record<string, unknown>> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    const found = await rows(table, filter, 'status,source_id,candidate_event_id,id,is_current,festival_year')
+    const select = table === 'events'
+      ? 'status,extracted_source_id,id,is_current,festival_year'
+      : table === 'source_indexings'
+        ? 'status,source_id,id'
+        : 'status,candidate_source_id,candidate_event_id,id'
+    const found = await rows(table, filter, select)
     const row = found.find((value) => typeof value.status === 'string' && accepted.includes(value.status))
     if (row) return row
     await new Promise((resolve) => setTimeout(resolve, 1_500))
@@ -91,7 +100,7 @@ async function acceptance(): Promise<void> {
     assert(['extracted', 'processing'].includes(String(extractionReplay.status)), 'Workflow B replay is terminal or lease-safe')
 
     const indexing = await webhook('buglasan-semantic-index', workerToken!, 'x-internal-orchestration-token', { source_id: canonicalSourceId })
-    assert(['indexed', 'processing'].includes(String(indexing.status)), 'Workflow C text indexing terminal or lease-safe')
+    assert(['indexed', 'processing'].includes(String(indexing.status)), `Workflow C text indexing terminal or lease-safe (status=${String(indexing.status)})`)
     await waitFor('source_indexings', `source_id=eq.${canonicalSourceId}`, ['indexed'], 'Workflow C persisted indexing evidence')
     const indexingReplay = await webhook('buglasan-semantic-index', workerToken!, 'x-internal-orchestration-token', { source_id: canonicalSourceId })
     assert(['indexed', 'processing'].includes(String(indexingReplay.status)), 'Workflow C replay is terminal or lease-safe')

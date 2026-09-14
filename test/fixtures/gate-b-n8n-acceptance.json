@@ -17,7 +17,6 @@
     "collection_method": "manual",
     "source_metadata": {
       "pipeline_acceptance_fixture": "phase9-v1",
-      "acceptance": true,
       "gate_b_n8n_acceptance": "synthetic-only"
     }
   },
@@ -37,7 +36,6 @@
     "collection_method": "manual",
     "source_metadata": {
       "pipeline_acceptance_fixture": "phase9-v1",
-      "acceptance": true,
       "gate_b_n8n_acceptance": "synthetic-only",
       "evidence": "synthetic image-only boundary"
     }

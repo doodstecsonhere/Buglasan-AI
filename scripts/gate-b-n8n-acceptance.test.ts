@@ -25,6 +25,12 @@ describe('Gate B n8n acceptance boundary', () => {
     expect(harness).not.toMatch(/(?:token|key)\s*[:=]\s*['"][A-Za-z0-9_-]{12,}/i)
   })
 
+  it('allows HTTP only for explicit loopback n8n hosts', () => {
+    expect(harness).toContain("['localhost', '127.0.0.1', '[::1]']")
+    expect(harness).toContain("url.protocol === 'http:'")
+    expect(harness).toContain("new URL(n8nUrl).protocol === 'https:' || isLoopbackHttpUrl(n8nUrl)")
+  })
+
   it('proves A/B/C/D paths, status replay behavior, and persisted ledger evidence', () => {
     for (const value of ['buglasan-source-collector', 'buglasan-knowledge-extractor', 'buglasan-semantic-index', 'buglasan-event-reconcile', 'source_indexings', 'event_reconciliation_runs', 'textlessSource', 'festival_year === 2027', 'extractionReplay', 'indexingReplay']) expect(harness).toContain(value)
   })

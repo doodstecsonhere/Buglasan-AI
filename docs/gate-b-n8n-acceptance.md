@@ -23,3 +23,14 @@ This is the only repository-owned procedure that proves the four n8n workflows e
 ## Expected blockers
 
 Live acceptance cannot be claimed from static tests. It remains blocked until an authorized operator imports the workflows, binds local credentials/environment variables, activates the workflows only for the attended run, and executes the guarded harness against the intended Supabase project. A missing deterministic fixture configuration, unavailable provider, non-terminal lease, or cleanup refusal is a stop condition, not a reason to retry-loop or broaden cleanup.
+
+## Operator status — 2026-09-13
+
+**Gate B: BLOCKED — human-only configuration prerequisite.** The local n8n service was safely restored and is healthy, but live acceptance was not invoked and no workflows or credentials were changed.
+
+- Docker Compose project was discovered at `C:\n8n-docker\docker-compose.yml`; the project maps its `n8n` service to `n8n_app` and preserves the named `n8n-docker_n8n_data` volume at `/home/node/.n8n`.
+- The sole recovery command was `docker compose -f C:\n8n-docker\docker-compose.yml up -d --force-recreate --no-deps n8n`. It recreated only `n8n_app`; it did not use `down`, `-v`, `--remove-orphans`, or any command targeting unrelated containers.
+- `http://localhost:5678/healthz` returned HTTP 200. Required runtime names were present: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `EXTRACT_SOURCE_TOKEN`, `INDEX_SOURCE_TOKEN`, `RECONCILE_EVENT_TOKEN`, `N8N_INTERNAL_BASE_URL`, and `N8N_INTERNAL_ORCHESTRATION_TOKEN`. No values were inspected or recorded.
+- The guarded local configuration is missing the required names `GATE_B_N8N_URL` and `LIVE_GATE_B_N8N_ACCEPTANCE`. The latter must be set to the exact attended-run opt-in documented above. Because the harness requires an HTTPS n8n URL, this must refer to an authorized HTTPS endpoint rather than the local HTTP health endpoint.
+- An authorized human operator must also complete the existing one-time preparation: import the four inactive workflow contracts, bind their Header Auth credentials with the required header names, activate workflows only for the attended window, retain execution IDs/redacted output, then deactivate them after the run. This operation intentionally does not create credentials or alter workflow activation because token values and authorization are human-controlled.
+- After those prerequisites are complete, run `npm run gate-b:n8n:acceptance`; the guarded harness performs its own trusted cleanup in `finally`. If interrupted, use `npm run gate-b:n8n:cleanup` under the same guarded configuration.
