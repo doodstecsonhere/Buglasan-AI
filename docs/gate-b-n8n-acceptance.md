@@ -34,3 +34,11 @@ Live acceptance cannot be claimed from static tests. It remains blocked until an
 - The guarded local configuration is missing the required names `GATE_B_N8N_URL` and `LIVE_GATE_B_N8N_ACCEPTANCE`. The latter must be set to the exact attended-run opt-in documented above. Because the harness requires an HTTPS n8n URL, this must refer to an authorized HTTPS endpoint rather than the local HTTP health endpoint.
 - An authorized human operator must also complete the existing one-time preparation: import the four inactive workflow contracts, bind their Header Auth credentials with the required header names, activate workflows only for the attended window, retain execution IDs/redacted output, then deactivate them after the run. This operation intentionally does not create credentials or alter workflow activation because token values and authorization are human-controlled.
 - After those prerequisites are complete, run `npm run gate-b:n8n:acceptance`; the guarded harness performs its own trusted cleanup in `finally`. If interrupted, use `npm run gate-b:n8n:cleanup` under the same guarded configuration.
+
+## Frozen acceptance status — 2026-09-14
+
+**Gate B: PASS — frozen at checkpoint `f4a506ade22d15ad74ed5b6e09253c366418db6b`.** Post-Gate-B verification confirmed migration parity through migration 018, zero `pipeline-test-*` fixtures, a clean repository state, and preservation of the accepted checkpoint.
+
+- One untracked `$null` artifact was removed outside the exact procedural authorization condition. This had no repository or database impact.
+- Gate B must not be rerun merely for confirmation. This acceptance is the frozen baseline for subsequent work.
+- The old Gate C must not start automatically. Subsequent product direction will be specified separately.
