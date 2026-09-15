@@ -1,12 +1,13 @@
 import { fileURLToPath, URL } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
-import { deploymentBranding } from './config/deployment-branding.mjs'
+import { selectProductionEventReleasePackage } from './config/release-package.mjs'
 import { staticPwaPlugin } from './build/pwa-static.mjs'
 import { assertPublicChatReleaseConfig } from './scripts/public-chat-release-config.mjs'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode, command }) => {
+  const eventReleasePackage = selectProductionEventReleasePackage()
   // Explicitly expose only the public key, never the server environment.
   const { SUPABASE_PUBLISHABLE_KEY } = loadEnv(mode, process.cwd(), 'SUPABASE_PUBLISHABLE_KEY')
   const publicEnv = loadEnv(mode, process.cwd(), '')
@@ -21,7 +22,7 @@ export default defineConfig(({ mode, command }) => {
   const demoModeDisabled = !demoModeEnabled
   return {
     plugins: [
-      staticPwaPlugin(deploymentBranding),
+      staticPwaPlugin(eventReleasePackage.branding),
       react(),
     ],
     resolve: {
