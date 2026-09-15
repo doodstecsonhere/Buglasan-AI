@@ -1,3 +1,5 @@
+import type { FreshnessMetadata } from '../utils/freshness'
+
 /**
  * Buglasan AI - Type Definitions
  * Core domain types for the festival-aware AI companion
@@ -141,6 +143,7 @@ export interface Message {
   festivalYear?: FestivalYear
   metadata?: Record<string, unknown>
   claimCitations?: ClaimCitation[]
+  freshness?: FreshnessMetadata
 }
 
 export interface SourceCitation {

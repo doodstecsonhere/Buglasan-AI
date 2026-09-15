@@ -16,6 +16,8 @@
 import type { Source, Event, FestivalYear, SourceCitation, ClaimCitation, ChatLanguage } from '../types'
 import { resolveFestivalYear, getCurrentFestivalYear } from '../utils/dateUtils'
 import { answerOffline, saveVerifiedKnowledge } from './offlineKnowledge'
+import { buglasanFreshnessConfig } from '../config/freshnessConfig'
+import { createCorpusHealth, createFreshnessMetadata, type FreshnessMetadata, type FreshnessTimestampSet } from '../utils/freshness'
 
 const DEMO_MODE = import.meta.env.MODE === 'test' || __DEMO_BUILD__
 const loadDemoRuntime = DEMO_MODE ? () => import('./demoChatRuntime') : null
@@ -104,6 +106,7 @@ export interface ChatResponse {
     timestamp: string
     sources: SourceCitation[]
     festivalYear: FestivalYear
+    freshness?: FreshnessMetadata
     claimCitations?: ClaimCitation[]
   }
   retrievedSources: Source[]
@@ -111,6 +114,8 @@ export interface ChatResponse {
   retrievedChunks?: ChunkSummary[]
   yearResolved: FestivalYear
   language: ChatLanguage
+  /** Optional additive freshness metadata; retrieval and citation contracts are unchanged. */
+  freshness?: FreshnessMetadata
 }
 
 /** Explicit instructions in the user's message override the UI/request language. */
@@ -234,6 +239,8 @@ class ChatService {
     }
 
     const response = await this.sendMessageLive(request)
+    response.freshness = this.buildFreshnessMetadata(request.message, response)
+    response.message = { ...response.message, freshness: response.freshness }
     void saveVerifiedKnowledge(response)
     return response
   }
@@ -246,10 +253,30 @@ class ChatService {
     if (!loadDemoRuntime) throw new ChatConfigurationError('Demo responses are unavailable in this build.')
     const language = resolveChatLanguage(request.message, request.language ?? 'en')
     const { sendDemoMessage } = await loadDemoRuntime()
-    return sendDemoMessage(request, festivalYear, language, (content, sources) => {
+    const response = await sendDemoMessage(request, festivalYear, language, (content, sources) => {
       const { citations, claimCitations } = mapValidatedCitations(content, sources)
       return { sources: citations, claimCitations }
     })
+    response.freshness = this.buildFreshnessMetadata(request.message, response)
+    response.message = { ...response.message, freshness: response.freshness }
+    return response
+  }
+
+  private buildFreshnessMetadata(question: string, response: ChatResponse): FreshnessMetadata {
+    const latest = (values: Array<Date | null | undefined>): string | null => {
+      const valid = values.filter((value): value is Date => value instanceof Date && !Number.isNaN(value.getTime()))
+      return valid.length ? new Date(Math.max(...valid.map(value => value.getTime()))).toISOString() : null
+    }
+    const timestamps: FreshnessTimestampSet = {
+      sourcePublishedAt: latest(response.retrievedSources.map(source => source.publishedAt)),
+      sourceCollectedAt: latest(response.retrievedSources.map(source => source.collectedAt)),
+      knowledgeBaseUpdatedAt: latest(response.retrievedSources.map(source => source.updatedAt)),
+    }
+    const corpusHealth = createCorpusHealth(
+      response.retrievedSources.length || response.retrievedEvents.length ? 'HEALTHY' : 'UNAVAILABLE',
+      response.retrievedSources.length || response.retrievedEvents.length ? 'Verified response evidence is available.' : 'No verified response evidence was available.',
+    )
+    return createFreshnessMetadata(question, timestamps, buglasanFreshnessConfig.freshness, new Date(), corpusHealth)
   }
 
   // ===========================================================================
@@ -319,6 +346,7 @@ class ChatService {
       retrievedEvents: data.retrievedEvents.filter(isRecord).map((event) => this.hydrateEvent(event)),
       yearResolved: data.yearResolved,
       language: data.language as ChatLanguage,
+      ...(isRecord(data.freshness) ? { freshness: data.freshness as unknown as FreshnessMetadata } : {}),
     }
   }
 

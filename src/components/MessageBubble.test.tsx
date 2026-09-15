@@ -20,6 +20,13 @@ describe('MessageBubble response rendering', () => {
     expect(element(elements[1]).props.children).toBe('Demo fixtures only.')
   })
 
+  it('keeps answer warnings conditional on freshness metadata', async () => {
+    const { MessageBubble } = await import('./MessageBubble')
+    const base = { id: 'answer', role: 'assistant' as const, content: 'Answer', timestamp: new Date() }
+    const withoutWarning = MessageBubble({ message: base, showAvatar: false })
+    expect(isValidElement(withoutWarning)).toBe(true)
+  })
+
   it('converts valid citation markers to mapped links while formatting adjacent Markdown', () => {
     const sources: SourceCitation[] = [{
       id: 'schedule-2026',

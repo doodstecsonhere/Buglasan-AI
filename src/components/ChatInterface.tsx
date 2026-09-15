@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble'
 import { SourcesCard } from './SourcesCard'
 import { TypingIndicator } from './TypingIndicator'
 import { productConfig } from '../config/productConfig'
+import type { FreshnessMetadata } from '../utils/freshness'
 
 interface ChatInterfaceProps {
   messages: Message[]
@@ -11,7 +12,24 @@ interface ChatInterfaceProps {
   messagesEndRef: RefObject<HTMLDivElement | null>
 }
 
-export function ChatInterface({ messages, isLoading, messagesEndRef }: ChatInterfaceProps) {
+function latestFreshnessDate(metadata: FreshnessMetadata | undefined): string | null {
+  if (!metadata) return null
+  const candidates = Object.values(metadata.evaluation.timestamps)
+    .filter(timestamp => timestamp.timestamp && timestamp.formattedAt)
+    .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))
+  return candidates[0]?.formattedAt ?? null
+}
+
+function FreshnessIndicator({ metadata, isOnline }: { metadata?: FreshnessMetadata; isOnline: boolean }) {
+  const date = latestFreshnessDate(metadata)
+  return <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" role="status">
+    {date ? <>Knowledge base last updated {date}.</> : <>Knowledge base update time is not available.</>}
+    {!isOnline && <span className="ml-1">Newer information may exist online.</span>}
+  </div>
+}
+
+export function ChatInterface({ messages, isLoading, messagesEndRef, isOnline = true }: ChatInterfaceProps & { isOnline?: boolean }) {
+  const latestMetadata = [...messages].reverse().find(message => message.role === 'assistant' && message.freshness)?.freshness
   if (messages.length === 0) {
     return (
       <div className="empty-state">
@@ -27,6 +45,7 @@ export function ChatInterface({ messages, isLoading, messagesEndRef }: ChatInter
 
   return (
     <div className="flex flex-col gap-5 py-2">
+      <FreshnessIndicator metadata={latestMetadata} isOnline={isOnline} />
       {messages.map((message, index) => (
         <div key={message.id} className="animate-fade-in">
             <MessageBubble

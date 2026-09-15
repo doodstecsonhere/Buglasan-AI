@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { formatRelativeTime } from '../utils/dateUtils'
 import { trustedSourceUrl } from '../utils/chatThreads'
 import { productConfig } from '../config/productConfig'
+import type { AnswerWarning } from '../utils/freshness'
 
 interface MessageBubbleProps {
   message: Message
@@ -20,6 +21,11 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
       )}
       
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
+        {!isUser && message.freshness?.warning && message.freshness.warning !== 'NONE' && (
+          <div role="note" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+            {warningCopy(message.freshness.warning)}
+          </div>
+        )}
         <div
           className={`
             max-w-full break-words px-4 py-3 text-sm leading-7 whitespace-pre-wrap
@@ -42,6 +48,16 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
       )}
     </div>
   )
+}
+
+function warningCopy(warning: AnswerWarning): string {
+  switch (warning) {
+    case 'STALE_SOURCE': return 'This time-sensitive answer relies on older source information. Verify the cited source for the latest update.'
+    case 'STALE_CORPUS': return 'This time-sensitive answer could not be confirmed against a current knowledge base.'
+    case 'MIXED_FRESHNESS': return 'Some information used for this time-sensitive answer may be older than other sources.'
+    case 'UNKNOWN_FRESHNESS': return 'The freshness of information for this time-sensitive answer could not be confirmed.'
+    default: return ''
+  }
 }
 
 export function renderCitedContent(content: unknown, sources: unknown) {
