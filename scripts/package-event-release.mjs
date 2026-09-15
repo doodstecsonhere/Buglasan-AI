@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
-import { defineEventReleasePackage, selectProductionEventReleasePackage } from '../config/release-package.mjs'
-
-const eventReleasePackage = selectProductionEventReleasePackage()
+import { defineEventReleasePackage, PRODUCTION_TARGET, selectRegisteredEventReleasePackage } from '../config/release-package.mjs'
 
 const REQUIRED_ARTIFACTS = Object.freeze(['index.html', 'manifest.webmanifest', 'offline.html', 'service-worker.js'])
 const PACKAGE_FILE = 'event-release-package.json'
@@ -11,9 +9,9 @@ const SECRET_PATTERN = /(?:service[_-]?role|api[_-]?key|access[_-]?token|client[
 
 function fail(message) { throw new Error(`Invalid event release package: ${message}`) }
 function sha256(bytes) { return createHash('sha256').update(bytes).digest('hex') }
-function validatedPackage(releasePackage, allowReference) {
+function validatedPackage(releasePackage, selectionOptions) {
   const selected = defineEventReleasePackage(releasePackage)
-  if (selected.deploymentClass === 'reference-only' && !allowReference) fail(`reference-only target ${selected.targetId} requires explicit reference opt-in`)
+  if (selected.deploymentClass === 'reference-only' && selectionOptions?.referenceOnlyAcknowledgement !== 'reference-only') fail(`reference-only target ${selected.targetId} requires explicit reference-only acknowledgement`)
   return selected
 }
 
@@ -28,12 +26,13 @@ async function filesBelow(root, directory = root) {
   return files.sort()
 }
 
-export async function inspectEventRelease(outputDirectory = eventReleasePackage.outputDirectory, { verifyManifest = true, releasePackage = eventReleasePackage, allowReference = false } = {}) {
-  const validatedReleasePackage = validatedPackage(releasePackage, allowReference)
-  const root = resolve(outputDirectory)
+export async function inspectEventRelease(outputDirectory, { verifyManifest = true, releasePackage, selectionOptions } = {}) {
+  const validatedReleasePackage = validatedPackage(releasePackage ?? selectRegisteredEventReleasePackage(PRODUCTION_TARGET), selectionOptions)
+  const selectedOutputDirectory = outputDirectory ?? validatedReleasePackage.outputDirectory
+  const root = resolve(selectedOutputDirectory)
   let info
-  try { info = await stat(root) } catch { fail(`output directory ${outputDirectory} does not exist; run the build first`) }
-  if (!info.isDirectory()) fail(`output directory ${outputDirectory} must be a directory`)
+  try { info = await stat(root) } catch { fail(`output directory ${selectedOutputDirectory} does not exist; run the build first`) }
+  if (!info.isDirectory()) fail(`output directory ${selectedOutputDirectory} must be a directory`)
 
   const allPaths = await filesBelow(root)
   const paths = allPaths.filter(path => path !== PACKAGE_FILE)
@@ -55,9 +54,9 @@ export async function inspectEventRelease(outputDirectory = eventReleasePackage.
   return Object.freeze(files)
 }
 
-export function renderEventReleaseManifest(files, releasePackage = eventReleasePackage, { allowReference = false } = {}) {
+export function renderEventReleaseManifest(files, releasePackage = selectRegisteredEventReleasePackage(PRODUCTION_TARGET), { selectionOptions } = {}) {
   if (!Array.isArray(files) || !files.length) fail('package must contain at least one artifact')
-  const validatedReleasePackage = validatedPackage(releasePackage, allowReference)
+  const validatedReleasePackage = validatedPackage(releasePackage, selectionOptions)
   return `${JSON.stringify({
     schemaVersion: validatedReleasePackage.schemaVersion,
     package: {
@@ -71,26 +70,30 @@ export function renderEventReleaseManifest(files, releasePackage = eventReleaseP
   }, null, 2)}\n`
 }
 
-export async function writeEventReleasePackage(outputDirectory = eventReleasePackage.outputDirectory, { releasePackage = eventReleasePackage, allowReference = false } = {}) {
+export async function writeEventReleasePackage(outputDirectory, { releasePackage, selectionOptions } = {}) {
   // A prior manifest is an output, not an input: rebuild it from the current
   // artifact set so a legitimate rebuild can replace stale integrity metadata.
-  const validatedReleasePackage = validatedPackage(releasePackage, allowReference)
-  const files = await inspectEventRelease(outputDirectory, { verifyManifest: false, releasePackage: validatedReleasePackage, allowReference })
-  const target = resolve(outputDirectory, PACKAGE_FILE)
-  const manifest = renderEventReleaseManifest(files, validatedReleasePackage, { allowReference })
+  const validatedReleasePackage = validatedPackage(releasePackage ?? selectRegisteredEventReleasePackage(PRODUCTION_TARGET), selectionOptions)
+  const selectedOutputDirectory = outputDirectory ?? validatedReleasePackage.outputDirectory
+  const files = await inspectEventRelease(selectedOutputDirectory, { verifyManifest: false, releasePackage: validatedReleasePackage, selectionOptions })
+  const target = resolve(selectedOutputDirectory, PACKAGE_FILE)
+  const manifest = renderEventReleaseManifest(files, validatedReleasePackage, { selectionOptions })
   await writeFile(target, manifest, 'utf8')
   return { target, manifest, files }
 }
 
 async function main() {
-  const [command = '--validate', outputDirectory = eventReleasePackage.outputDirectory, ...options] = process.argv.slice(2)
-  if (!['--validate', '--write'].includes(command) || options.length) fail('usage: package-event-release.mjs [--validate|--write] [output-directory]')
+  const [command = '--validate', targetId = PRODUCTION_TARGET, outputDirectory, acknowledgement, ...options] = process.argv.slice(2)
+  if (!['--validate', '--write'].includes(command) || options.length) fail('usage: package-event-release.mjs [--validate|--write] [target-id] [output-directory] [reference-only]')
+  const selectionOptions = acknowledgement ? { referenceOnlyAcknowledgement: acknowledgement } : undefined
+  const releasePackage = selectRegisteredEventReleasePackage(targetId, selectionOptions)
+  const selectedOutputDirectory = outputDirectory ?? releasePackage.outputDirectory
   if (command === '--validate') {
-    const files = await inspectEventRelease(outputDirectory)
-    console.log(`Validated ${files.length} event release artifacts in ${outputDirectory}.`)
+    const files = await inspectEventRelease(selectedOutputDirectory, { releasePackage, selectionOptions })
+    console.log(`Validated ${files.length} ${targetId} event release artifacts in ${selectedOutputDirectory}.`)
   } else {
-    const result = await writeEventReleasePackage(outputDirectory)
-    console.log(`Wrote ${result.target} for ${result.files.length} event release artifacts.`)
+    const result = await writeEventReleasePackage(selectedOutputDirectory, { releasePackage, selectionOptions })
+    console.log(`Wrote ${result.target} for ${result.files.length} ${targetId} event release artifacts.`)
   }
 }
 

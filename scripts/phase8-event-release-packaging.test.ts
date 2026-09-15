@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { deploymentBranding } from '../config/deployment-branding.mjs'
-import { defineEventReleasePackage, eventReleasePackage, eventReleasePackageDefinitions, selectEventReleasePackage, selectProductionEventReleasePackage } from '../config/release-package.mjs'
+import { defineEventReleasePackage, eventReleasePackage, eventReleasePackageDefinitions, HARBOR_REFERENCE_TARGET, REFERENCE_ONLY_ACKNOWLEDGEMENT, selectEventReleasePackage, selectProductionEventReleasePackage, selectRegisteredEventReleasePackage } from '../config/release-package.mjs'
 import { PACKAGE_FILE, REQUIRED_ARTIFACTS, inspectEventRelease, renderEventReleaseManifest, writeEventReleasePackage } from './package-event-release.mjs'
 import { harborDaysReferenceDeployment } from '../test/fixtures/phase7-harbor-days.mjs'
 import { harborReferenceReleasePackage } from '../test/fixtures/phase8-harbor-release-package.mjs'
@@ -39,8 +39,8 @@ describe('Phase 8 independent event release packaging', () => {
   it('P8-T17 keeps Harbor acquisition operator-provided and manual', () => expect(harborDaysReferenceDeployment.source.acquisition).toMatchObject({ state: 'operator_provided_content', collectionMethod: 'manual' }))
   it('P8-T18 declares Harbor as reference-only', () => expect(harborReferenceReleasePackage.deploymentClass).toBe('reference-only'))
   it('P8-T19 refuses Harbor generic selection without explicit reference opt-in', () => expect(() => selectEventReleasePackage([eventReleasePackage, harborReferenceReleasePackage], 'harbor-reference')).toThrow('reference-only'))
-  it('P8-T20 selects Harbor only with explicit reference opt-in', () => expect(selectEventReleasePackage([eventReleasePackage, harborReferenceReleasePackage], 'harbor-reference', { allowReference: true })).toEqual(harborReferenceReleasePackage))
-  it('P8-T21 excludes Harbor from production definitions', () => expect(eventReleasePackageDefinitions).not.toContain(harborReferenceReleasePackage))
+  it('P8-T20 selects Harbor only with the explicit reference-only acknowledgement', () => expect(selectEventReleasePackage(eventReleasePackageDefinitions, HARBOR_REFERENCE_TARGET, { referenceOnlyAcknowledgement: REFERENCE_ONLY_ACKNOWLEDGEMENT })).toEqual(harborReferenceReleasePackage))
+  it('P8-T21 registers both Buglasan production and Harbor reference selectors', () => expect(eventReleasePackageDefinitions.map(definition => definition.targetId)).toEqual(['buglasan-production', 'harbor-reference']))
   it('P8-T22 excludes Harbor from the production package contract', () => expect(JSON.stringify(eventReleasePackage)).not.toContain('Harbor'))
   it('P8-T23 excludes Harbor verification URLs from the production package contract', () => expect(JSON.stringify(eventReleasePackage)).not.toContain(harborDaysReferenceDeployment.product.verificationUrl))
   it('P8-T24 validates every required static-shell artifact', async () => { const root = await releaseDirectory(); try { expect((await inspectEventRelease(root)).map(file => file.path)).toEqual(['assets/app.js', ...REQUIRED_ARTIFACTS]) } finally { await rm(root, { recursive: true, force: true }) } })
@@ -49,9 +49,19 @@ describe('Phase 8 independent event release packaging', () => {
   it('P8-T27 orders manifest paths lexically', async () => { const root = await releaseDirectory(); try { const manifest = JSON.parse(renderEventReleaseManifest(await inspectEventRelease(root))); expect(manifest.files).toEqual([...manifest.files].sort((left, right) => left.path.localeCompare(right.path))) } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T28 omits time and environment input from the manifest', async () => { const root = await releaseDirectory(); try { expect(renderEventReleaseManifest(await inspectEventRelease(root))).not.toMatch(/created|date|\.env|process\.env/i) } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T29 writes the integrity manifest to the package directory', async () => { const root = await releaseDirectory(); try { expect((await writeEventReleasePackage(root)).target).toBe(join(root, PACKAGE_FILE)) } finally { await rm(root, { recursive: true, force: true }) } })
-  it('P8-T30 writes the selected generic reference package identity only after package opt-in', async () => { const root = await releaseDirectory(); try { const reference = selectEventReleasePackage([eventReleasePackage, harborReferenceReleasePackage], 'harbor-reference', { allowReference: true }); await expect(writeEventReleasePackage(root, { releasePackage: reference })).rejects.toThrow('reference opt-in'); await writeEventReleasePackage(root, { releasePackage: reference, allowReference: true }); expect(JSON.parse(await readFile(join(root, PACKAGE_FILE), 'utf8')).package.id).toBe('harbor-guide-reference') } finally { await rm(root, { recursive: true, force: true }) } })
+  it('P8-T30 writes the selected generic reference package identity only after acknowledgement', async () => { const root = await releaseDirectory(); try { const reference = selectRegisteredEventReleasePackage(HARBOR_REFERENCE_TARGET, { referenceOnlyAcknowledgement: REFERENCE_ONLY_ACKNOWLEDGEMENT }); await expect(writeEventReleasePackage(root, { releasePackage: reference })).rejects.toThrow('reference-only acknowledgement'); await writeEventReleasePackage(root, { releasePackage: reference, selectionOptions: { referenceOnlyAcknowledgement: REFERENCE_ONLY_ACKNOWLEDGEMENT } }); expect(JSON.parse(await readFile(join(root, PACKAGE_FILE), 'utf8')).package.id).toBe('harbor-guide-reference') } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T31 rewrites a stale manifest after valid artifacts are rebuilt', async () => { const root = await releaseDirectory(); try { await writeFile(join(root, PACKAGE_FILE), '{}\n'); await expect(writeEventReleasePackage(root)).resolves.toMatchObject({ target: join(root, PACKAGE_FILE) }) } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T32 rejects source maps', async () => { const root = await releaseDirectory(); try { await writeFile(join(root, 'assets', 'app.js.map'), '{}'); await expect(inspectEventRelease(root)).rejects.toThrow('source maps') } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T33 rejects credential-shaped artifact bytes', async () => { const root = await releaseDirectory(); try { await writeFile(join(root, 'assets', 'app.js'), 'api_key=abcdefghijklmnopqrstuvwxyz'); await expect(inspectEventRelease(root)).rejects.toThrow('credential material') } finally { await rm(root, { recursive: true, force: true }) } })
   it('P8-T34 rejects unvalidated generic package input', () => expect(() => renderEventReleaseManifest([{ path: 'index.html', bytes: 1, sha256: 'x' }], { packageId: 'invalid' })).toThrow('schemaVersion'))
+  it('P8-T35 scans both identities bidirectionally', () => {
+    const buglasan = JSON.stringify(eventReleasePackage.product)
+    const harbor = JSON.stringify(harborReferenceReleasePackage.product)
+    expect(buglasan).not.toMatch(/harbor|synthetic/i)
+    expect(harbor).not.toMatch(/buglasan|negros oriental|dumaguete/i)
+  })
+  it('P8-T36 permits a materially distinct third configuration through the generic selector', () => {
+    const third = defineEventReleasePackage({ ...harborReferenceReleasePackage, targetId: 'island-reference', packageId: 'island-guide-reference', outputDirectory: 'island-reference-dist', product: { assistantName: 'Island Guide', eventName: 'Island Festival', officialUrl: 'https://example.test/island' }, branding: { ...harborReferenceReleasePackage.branding, product: { ...harborReferenceReleasePackage.branding.product, assistantName: 'Island Guide', eventName: 'Island Festival', officialUrl: 'https://example.test/island' } } })
+    expect(selectEventReleasePackage([eventReleasePackage, harborReferenceReleasePackage, third], 'island-reference', { referenceOnlyAcknowledgement: REFERENCE_ONLY_ACKNOWLEDGEMENT })).toMatchObject({ packageId: 'island-guide-reference', targetId: 'island-reference' })
+  })
 })

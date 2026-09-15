@@ -1,9 +1,12 @@
 import { deploymentBranding } from './deployment-branding.mjs'
 import { validateDeploymentBranding } from '../build/pwa-static.mjs'
+import { syntheticDeploymentBranding } from '../test/fixtures/pwa-synthetic-branding.mjs'
 
 const SAFE_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 const SAFE_OUTPUT_DIRECTORY = /^(?!.*(?:^|[\\/])\.\.?[\\/])[a-zA-Z0-9][a-zA-Z0-9._-]*$/
 const PRODUCTION_TARGET = 'buglasan-production'
+const HARBOR_REFERENCE_TARGET = 'harbor-reference'
+export const REFERENCE_ONLY_ACKNOWLEDGEMENT = 'reference-only'
 
 function fail(path, message) { throw new Error(`Invalid event release package at ${path}: ${message}`) }
 function exactObject(value, path, keys) {
@@ -42,15 +45,19 @@ export function defineEventReleasePackage(input) {
  * boundary: production callers pass the immutable Buglasan target, while
  * reference callers must additionally assert their test-only intent.
  */
-export function selectEventReleasePackage(definitions, targetId, { allowReference = false } = {}) {
+export function selectEventReleasePackage(definitions, targetId, { referenceOnlyAcknowledgement } = {}) {
   if (!Array.isArray(definitions) || !definitions.length) fail('definitions', 'must be a non-empty array')
   if (typeof targetId !== 'string' || !targetId) fail('targetId', 'must explicitly name a configured package target')
   const validated = definitions.map(defineEventReleasePackage)
   if (new Set(validated.map(definition => definition.targetId)).size !== validated.length) fail('definitions', 'targetId values must be unique')
   const selected = validated.find(definition => definition.targetId === targetId)
   if (!selected) fail('targetId', `does not name a configured package target: ${targetId}`)
-  if (selected.deploymentClass === 'reference-only' && !allowReference) fail('targetId', `${targetId} is reference-only and cannot be selected for a production build`)
+  if (selected.deploymentClass === 'reference-only' && referenceOnlyAcknowledgement !== REFERENCE_ONLY_ACKNOWLEDGEMENT) fail('targetId', `${targetId} is reference-only; pass the explicit reference-only acknowledgement`)
   return selected
+}
+
+export function selectRegisteredEventReleasePackage(targetId, options) {
+  return selectEventReleasePackage(eventReleasePackageDefinitions, targetId, options)
 }
 
 export const eventReleasePackageDefinitions = Object.freeze([
@@ -68,6 +75,20 @@ export const eventReleasePackageDefinitions = Object.freeze([
     },
     branding: deploymentBranding,
   }),
+  defineEventReleasePackage({
+    schemaVersion: 'event-release-package/v1',
+    targetId: HARBOR_REFERENCE_TARGET,
+    deploymentClass: 'reference-only',
+    packageId: 'harbor-guide-reference',
+    outputDirectory: 'harbor-reference-dist',
+    hosting: { protocol: 'https', historyFallback: '/index.html', entrypoint: '/index.html' },
+    product: {
+      assistantName: syntheticDeploymentBranding.product.assistantName,
+      eventName: syntheticDeploymentBranding.product.eventName,
+      officialUrl: syntheticDeploymentBranding.product.officialUrl,
+    },
+    branding: syntheticDeploymentBranding,
+  }),
 ])
 
 /** Production builds have exactly one target and never read a target selector. */
@@ -77,4 +98,4 @@ export function selectProductionEventReleasePackage() {
 
 // Compatibility export and the immutable default production package contract.
 export const eventReleasePackage = selectProductionEventReleasePackage()
-export { PRODUCTION_TARGET }
+export { HARBOR_REFERENCE_TARGET, PRODUCTION_TARGET }

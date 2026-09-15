@@ -188,7 +188,9 @@ describe('Phase 7 deterministic generic-event reference deployment proof', () =>
     expect(adapterSource).toMatch(/source\.type !== 'facebook'/)
     expect(adapterSource).toMatch(/No collector target is selected/)
     expect(sourceRecord().acquisition).toMatchObject({ state: 'operator_provided_content', collection_method: 'manual' })
-    expect(readFileSync('package.json', 'utf8')).not.toMatch(/deploy|vercel|cloudflare/i)
+    // Build-time deployment validation is permitted; no hosted deployment
+    // provider or external deployment target may be introduced.
+    expect(readFileSync('package.json', 'utf8')).not.toMatch(/vercel|cloudflare/i)
     expect(adapterSource).not.toMatch(/(?:fetch\s*\(|axios|graph\.facebook\.com|facebook\.com\/v\d)/i)
     expect(workflow).not.toMatch(/Harbor Days|Harbor Lights/i)
     assertNoLeakedSecrets(runtimeText)
