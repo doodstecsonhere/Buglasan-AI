@@ -5,15 +5,16 @@
  */
 
 import type { FestivalYear, DateResolution, YearResolution } from '../types'
+import { productConfig } from '../config/productConfig'
 
 // Timezone constant for Philippines
-export const PH_TIMEZONE = 'Asia/Manila'
+export const PH_TIMEZONE = productConfig.regional.timeZone
 
 /**
  * Get current date in Asia/Manila timezone
  */
 export function getCurrentDateInPH(): Date {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: PH_TIMEZONE }))
+  return new Date(new Date().toLocaleString(productConfig.regional.clockConversionLocale, { timeZone: PH_TIMEZONE }))
 }
 
 /**
@@ -60,7 +61,7 @@ export function resolveFestivalYear(query: string, defaultYear?: FestivalYear): 
       if (yearMatch) {
         const explicitYear = parseInt(yearMatch[0], 10)
         // Validate reasonable range
-        if (explicitYear >= 2020 && explicitYear <= 2030) {
+        if (explicitYear >= productConfig.eventCycle.queryYearMin && explicitYear <= productConfig.eventCycle.queryYearMax) {
           return {
             festivalYear: explicitYear,
             isExplicit: true,
@@ -194,8 +195,9 @@ export function resolveRelativeDate(expression: string, referenceDate?: Date): D
  * Buglasan Festival: typically mid-October (15th-25th)
  */
 export function isDateInFestivalRange(date: Date, festivalYear: FestivalYear): boolean {
-  const festivalStart = new Date(festivalYear, 9, 15) // October 15
-  const festivalEnd = new Date(festivalYear, 9, 25)   // October 25
+  const { typicalStart, typicalEnd } = productConfig.eventCycle
+  const festivalStart = new Date(festivalYear, typicalStart.monthIndex, typicalStart.day)
+  const festivalEnd = new Date(festivalYear, typicalEnd.monthIndex, typicalEnd.day)
   
   const checkDate = new Date(date)
   checkDate.setHours(0, 0, 0, 0)
@@ -207,9 +209,10 @@ export function isDateInFestivalRange(date: Date, festivalYear: FestivalYear): b
  * Get festival date range for a given year
  */
 export function getFestivalDateRange(festivalYear: FestivalYear): { start: Date; end: Date } {
+  const { typicalStart, typicalEnd } = productConfig.eventCycle
   return {
-    start: new Date(festivalYear, 9, 15), // October 15
-    end: new Date(festivalYear, 9, 25),   // October 25
+    start: new Date(festivalYear, typicalStart.monthIndex, typicalStart.day),
+    end: new Date(festivalYear, typicalEnd.monthIndex, typicalEnd.day),
   }
 }
 
@@ -226,7 +229,7 @@ export function formatPHDate(date: Date, options: Intl.DateTimeFormatOptions = {
     ...options,
   }
   
-  return new Intl.DateTimeFormat('en-PH', defaultOptions).format(date)
+  return new Intl.DateTimeFormat(productConfig.regional.displayLocale, defaultOptions).format(date)
 }
 
 /**

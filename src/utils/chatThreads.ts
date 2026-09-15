@@ -1,6 +1,7 @@
 import type { Message, SourceCitation } from '../types'
+import { productConfig } from '../config/productConfig'
 
-export const CHAT_THREADS_STORAGE_KEY = 'buglasan-ai.chat-threads.v1'
+export const CHAT_THREADS_STORAGE_KEY = productConfig.persistence.chatThreadsStorageKey
 
 export interface ChatThread {
   id: string
@@ -121,7 +122,8 @@ export function titleFromMessages(messages: Message[]) {
   const firstUserMessage = messages.find(message => message.role === 'user')
   if (!firstUserMessage) return 'New conversation'
   const title = firstUserMessage.content.replace(/\s+/g, ' ').trim()
-  return title.length > 48 ? `${title.slice(0, 48).trimEnd()}…` : title
+  const limit = productConfig.chatPolicy.threadTitleMaxLength
+  return title.length > limit ? `${title.slice(0, limit).trimEnd()}…` : title
 }
 
 export function createChatThread(messages: Message[]): ChatThread {

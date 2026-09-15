@@ -3,6 +3,7 @@ import type { Message } from '../types'
 import { MessageBubble } from './MessageBubble'
 import { SourcesCard } from './SourcesCard'
 import { TypingIndicator } from './TypingIndicator'
+import { productConfig } from '../config/productConfig'
 
 interface ChatInterfaceProps {
   messages: Message[]
@@ -14,11 +15,11 @@ export function ChatInterface({ messages, isLoading, messagesEndRef }: ChatInter
   if (messages.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-icon"><img src="/icons/icon-192.png" alt="" aria-hidden="true" /></div>
+        <div className="empty-icon"><img src={productConfig.branding.appIconPath} alt="" aria-hidden="true" /></div>
         <p className="eyebrow">Ask with confidence</p>
-        <h3 className="text-2xl font-bold tracking-tight text-slate-950">Your Buglasan questions,<br className="sm:hidden" /> answered with official sources.</h3>
+        <h3 className="text-2xl font-bold tracking-tight text-slate-950">Your {productConfig.identity.festivalShortName} questions,<br className="sm:hidden" /> answered with official sources.</h3>
         <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
-          Ask about Buglasan Festival. I’ll look for official information and show you where each answer comes from.
+          Ask about {productConfig.identity.festivalName}. I’ll look for official information and show you where each answer comes from.
         </p>
       </div>
     )

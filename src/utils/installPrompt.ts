@@ -1,4 +1,6 @@
-export const INSTALL_DISMISSED_STORAGE_KEY = 'buglasan-install-dismissed'
+import { productConfig } from '../config/productConfig'
+
+export const INSTALL_DISMISSED_STORAGE_KEY = productConfig.persistence.installDismissedStorageKey
 
 export function readInstallDismissed(): boolean {
   try {

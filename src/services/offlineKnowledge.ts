@@ -1,11 +1,12 @@
 import type { ChatResponse, ChatRequest } from './chatService'
 import type { ChatLanguage, Event, FestivalYear, SourceCitation } from '../types'
 import { getCurrentDateInPH } from '../utils/dateUtils'
+import { productConfig } from '../config/productConfig'
 
-const DATABASE_NAME = 'buglasan-ai-offline-knowledge'
-const STORE_NAME = 'verified-snapshots'
-const DATABASE_VERSION = 1
-const OFFICIAL_FACEBOOK = 'https://www.facebook.com/Buglasan'
+const DATABASE_NAME = productConfig.persistence.offlineKnowledge.databaseName
+const STORE_NAME = productConfig.persistence.offlineKnowledge.storeName
+const DATABASE_VERSION = productConfig.persistence.offlineKnowledge.databaseVersion
+const OFFICIAL_FACEBOOK = productConfig.officialSource.url
 
 export interface VerifiedKnowledgeSnapshot {
   version: 1
@@ -96,7 +97,7 @@ export async function answerOffline(request: ChatRequest, year: FestivalYear): P
   const language = request.language ?? 'en'
   const snapshot = await load(year)
   const now = getCurrentDateInPH()
-  const freshness = snapshot ? new Date(snapshot.savedAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }) : ''
+  const freshness = snapshot ? new Date(snapshot.savedAt).toLocaleString(productConfig.regional.displayLocale, { timeZone: productConfig.regional.timeZone, dateStyle: 'medium', timeStyle: 'short' }) : ''
   const suffix = snapshot ? `\n\n_${offlineFreshness(language, freshness)}_` : ''
   if (!snapshot) return offlineResponse(noCache(language), [], [], year, language)
   if (isAnnouncement(request.message)) {
@@ -111,14 +112,14 @@ export async function answerOffline(request: ChatRequest, year: FestivalYear): P
   else if (/\b(upcoming|coming\s+up)\b/i.test(request.message)) events = events.filter(event => new Date(event.startDatetime) >= now)
   else if (!dateWindow(request.message)) events = events.filter(event => words(`${event.eventName} ${event.venue} ${event.description ?? ''}`).some(word => queryWords.has(word)))
   if (!events.length) return offlineResponse(`${unavailable(language)}${suffix}`, snapshot.sources, [], year, language)
-  const lines = events.slice(0, 6).map(event => `• **${event.eventName}** — ${new Date(event.startDatetime).toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' })}${event.venue ? `, ${event.venue}` : ''} (${event.status})`)
+  const lines = events.slice(0, productConfig.chatPolicy.offlineEventLimit).map(event => `• **${event.eventName}** — ${new Date(event.startDatetime).toLocaleString(productConfig.regional.displayLocale, { timeZone: productConfig.regional.timeZone, dateStyle: 'medium', timeStyle: 'short' })}${event.venue ? `, ${event.venue}` : ''} (${event.status})`)
   return offlineResponse(`${cachedFacts(language)}\n${lines.join('\n')}${suffix}`, snapshot.sources, events, year, language)
 }
 
 function offlineResponse(content: string, sources: SourceCitation[], events: Event[], year: FestivalYear, language: ChatLanguage): ChatResponse {
   return { message: { id: crypto.randomUUID(), role: 'assistant', content, timestamp: new Date().toISOString(), sources, festivalYear: year }, retrievedSources: [], retrievedEvents: events, yearResolved: year, language }
 }
-function sameDay(a: Date, b: Date) { return a.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }) === b.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }) }
+function sameDay(a: Date, b: Date) { return a.toLocaleDateString('en-CA', { timeZone: productConfig.regional.timeZone }) === b.toLocaleDateString('en-CA', { timeZone: productConfig.regional.timeZone }) }
 function addDays(value: Date, days: number) { const next = new Date(value); next.setDate(next.getDate() + days); return next }
 function offlineFreshness(language: ChatLanguage, date: string) { return ({ en: `Offline cache saved ${date}. It may be stale.`, ceb: `Offline cache gi-save ${date}. Posibleng dili na kini bag-o.`, fil: `Na-save ang offline cache noong ${date}. Maaaring luma na ito.` })[language] }
 function noCache(language: ChatLanguage) { return ({ en: 'You are offline and no verified Buglasan information is cached on this device yet.', ceb: 'Offline ka ug wala pay beripikadong impormasyon sa Buglasan nga na-cache sa kini nga device.', fil: 'Offline ka at wala pang naka-cache na beripikadong impormasyon tungkol sa Buglasan sa device na ito.' })[language] }
