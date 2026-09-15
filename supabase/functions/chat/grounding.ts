@@ -1,3 +1,5 @@
+import { ragPolicy } from '../../../config/rag-policy.mjs'
+
 export type SupportedLanguage = 'en' | 'ceb' | 'fil'
 
 export interface GroundingSourceRecord {
@@ -25,9 +27,9 @@ export function isExactOfficialFacebookPostUrl(value: unknown, postId: unknown):
   try {
     const url = new URL(value)
     return url.protocol === 'https:' &&
-      url.hostname === 'www.facebook.com' &&
+      url.hostname === ragPolicy.citations.host &&
       !url.port && !url.username && !url.password && !url.search && !url.hash &&
-      /^\/Buglasan\/posts\/(?:\d+|[^/]+\/\d+)\/$/.test(url.pathname) &&
+      new RegExp(`^${ragPolicy.citations.postPathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\d+|[^/]+/\\d+)/$`).test(url.pathname) &&
       url.pathname.endsWith(`/${postId}/`)
   } catch {
     return false
@@ -92,7 +94,7 @@ export interface EvidencePresence {
   chunks: readonly unknown[]
 }
 
-export const OFFICIAL_BUGLASAN_FACEBOOK_URL = 'https://www.facebook.com/Buglasan'
+export const OFFICIAL_BUGLASAN_FACEBOOK_URL = ragPolicy.verification.url
 
 /**
  * General conversation is intentionally narrow: these requests do not need

@@ -47,6 +47,7 @@ import { getGenerationFailure, type GenerationFailure } from './generationDiagno
 import { GENERATION_RETRY_METADATA, type GenerationRetryMetadata } from './generationRetry.ts'
 import { geminiRestAdapter, configuredSecondaryAdapter } from '../_shared/providerAdapters.ts'
 import { generateWithFailover } from '../_shared/providerFailover.ts'
+import { genericRagPrinciples, ragPolicy } from '../../../config/rag-policy.mjs'
 
 // ============================================
 // Types
@@ -186,7 +187,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const secretKeys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS')!)
 const secretKey = secretKeys['default']
 
-const PH_TIMEZONE = 'Asia/Manila'
+const PH_TIMEZONE = ragPolicy.regional.timeZone
 const CHAT_EXECUTION_TIMEOUT_MS = 40_000
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 7_000
 
@@ -207,7 +208,9 @@ const CONTEXT_LIMITS = {
 // ============================================
 // System Prompt
 // ============================================
-const SYSTEM_PROMPT = `You are Buglasan AI, a multilingual, year-aware AI companion for the Buglasan Festival of Negros Oriental, Philippines.
+const SYSTEM_PROMPT = `You are ${ragPolicy.identity.assistantName}, ${ragPolicy.identity.description}.
+
+PRODUCT STATUS: This is an unofficial, operator-curated product. Official-source authority describes evidence provenance; it does not imply that this product is official or affiliated with the source authority.
 
 CORE PRINCIPLES:
 1. GROUNDING: Only answer using provided sources and events. Never hallucinate.
@@ -215,8 +218,9 @@ CORE PRINCIPLES:
 3. YEAR-AWARENESS: Respect the festival_year context. Current year takes priority.
 4. SUPERSESSION: Prefer non-superseded, current sources. Note when info was updated.
 5. HONESTY: If no current official info exists, say so clearly. Historical info only if explicitly labeled.
-6. MULTILINGUAL: Respond in the user's language (English, Cebuano/Bisaya, Filipino/Tagalog).
-7. DATE REASONING: Resolve "today", "tomorrow", "this weekend", "upcoming" in Asia/Manila timezone.
+6. MULTILINGUAL: Respond in the user's language (${ragPolicy.languages.supported.map((language: { label: string }) => language.label).join(', ')}).
+7. DATE REASONING: Resolve "today", "tomorrow", "this weekend", "upcoming" in ${ragPolicy.regional.timeZone} timezone.
+8. EPISTEMIC STATUS: ${genericRagPrinciples.evidence.unknownIsNotNo ? 'UNKNOWN is not NO. Never turn missing evidence into a negative factual claim.' : ''}
 
 RESPONSE FORMAT:
 - Use clear, conversational tone with festival warmth
@@ -231,7 +235,7 @@ LANGUAGES:
 - Filipino/Tagalog: "Paano kita matutulungan?" / "Festival ng Buglasan"
 
 CURRENT CONTEXT:
-- Timezone: Asia/Manila
+- Timezone: ${ragPolicy.regional.timeZone}
 - The resolved festival year and current official evidence are provided in context
 - Do not rely on prior knowledge for festival dates, venues, schedules, organizers, traditions, history, or announcement timing`
 
@@ -257,7 +261,7 @@ function resolveFestivalYear(query: string, defaultYear: number): { year: number
       const yearMatch = matches[0].match(/\d{4}/)
       if (yearMatch) {
         const explicitYear = parseInt(yearMatch[0], 10)
-        if (explicitYear >= 2020 && explicitYear <= 2030) {
+        if (explicitYear >= ragPolicy.years.minimum && explicitYear <= ragPolicy.years.maximum) {
           return { year: explicitYear, isExplicit: true }
         }
       }
@@ -1060,7 +1064,7 @@ serve(async (req) => {
     }
 
     const historyContext = conversationHistory
-      .slice(-6)
+      .slice(-ragPolicy.chat.conversationHistoryLimit)
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n')
 

@@ -1,4 +1,5 @@
 import { configuredProduct } from '../../config/product-config.mjs'
+import { assertProductRagParity, ragPolicy } from '../../config/rag-policy.mjs'
 
 export type ProductLanguageCode = 'en' | 'ceb' | 'fil'
 
@@ -225,3 +226,4 @@ export function defineProductConfig(input: unknown): ProductConfig {
 }
 
 export const productConfig = defineProductConfig(configuredProduct)
+assertProductRagParity(productConfig, ragPolicy)
