@@ -30,3 +30,4 @@ supabase/.temp/
 *.sln
 *.sw?
 phase10-terminal-retry-inspection.json
+/$null
