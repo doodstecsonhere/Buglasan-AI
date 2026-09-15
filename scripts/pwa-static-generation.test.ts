@@ -82,7 +82,7 @@ describe('Phase 2 deployment branding and static generation', () => {
   })
 
   it('P2-T3 rejects arbitrary HTML, demo markers, and credential indicators by escaping all metadata', async () => {
-    const config = clone(syntheticDeploymentBranding); mutable(config).metadata.htmlDescription = '<script>alert(1)</script>'
+    const config = clone(syntheticDeploymentBranding) as Parameters<typeof renderStaticDeployment>[0]; mutable(config).metadata.htmlDescription = '<script>alert(1)</script>'
     const html = (await renderStaticDeployment(config, syntheticRoot))['index.html']
     expect(html).not.toContain('<script>alert(1)</script>'); expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     const credential = clone(deploymentBranding); mutable(credential).offline.message = 'Bearer abcdefghijklmnop'
@@ -91,9 +91,9 @@ describe('Phase 2 deployment branding and static generation', () => {
 
   it('P2-T4 validates SVG safety and every raster existence, signature, and dimensions without fallback', async () => {
     await expect(validateDeploymentAssets(deploymentBranding, root)).resolves.toBeUndefined()
-    const wrongSize = clone(syntheticDeploymentBranding); mutable(wrongSize).assets.logo.width = 1200
+    const wrongSize = clone(syntheticDeploymentBranding) as Parameters<typeof validateDeploymentAssets>[0]; mutable(wrongSize).assets.logo.width = 1200
     await expect(validateDeploymentAssets(wrongSize, syntheticRoot)).rejects.toThrow('must be 1200x1254')
-    const unsafeSvg = clone(syntheticDeploymentBranding); await writeFile(resolve(syntheticRoot, 'public/favicon.svg'), '<svg><script>alert(1)</script></svg>')
+    const unsafeSvg = clone(syntheticDeploymentBranding) as Parameters<typeof validateDeploymentAssets>[0]; await writeFile(resolve(syntheticRoot, 'public/favicon.svg'), '<svg><script>alert(1)</script></svg>')
     await expect(validateDeploymentAssets(unsafeSvg, syntheticRoot)).rejects.toThrow('safe standalone SVG')
     await cp(resolve(root, 'public/favicon.svg'), resolve(syntheticRoot, 'public/favicon.svg'))
   })
@@ -104,7 +104,7 @@ describe('Phase 2 deployment branding and static generation', () => {
   })
 
   it('P2-T6/T7 rendered synthetic artifacts use only their declared static identity fields with zero production leakage', async () => {
-    const rendered = await renderStaticDeployment(syntheticDeploymentBranding, syntheticRoot); const combined = Object.values(rendered).join('\n')
+    const rendered = await renderStaticDeployment(syntheticDeploymentBranding as Parameters<typeof renderStaticDeployment>[0], syntheticRoot); const combined = Object.values(rendered).join('\n')
     const html = rendered['index.html']; const manifest = JSON.parse(rendered['manifest.webmanifest'])
     expect(html).toContain('<title>Harbor Guide</title>'); expect(html).toContain('content="Harbor Lights Festival"'); expect(html).toContain('https://www.facebook.com/HarborLightsOfficial')
     expect(html).toContain('href="/favicon.svg"'); expect(html).toContain('href="/icons/harbor-apple.png"'); expect(html).toContain('content="/brand/harbor-guide.png"'); expect(html).toContain('content="#123456"')
@@ -120,14 +120,14 @@ describe('Phase 2 deployment branding and static generation', () => {
   })
 
   it('P2-T8/T9 generates escaped offline identity and deployment/storage-derived cache namespace', async () => {
-    const rendered = await renderStaticDeployment(syntheticDeploymentBranding, syntheticRoot)
+    const rendered = await renderStaticDeployment(syntheticDeploymentBranding as Parameters<typeof renderStaticDeployment>[0], syntheticRoot)
     expect(rendered['offline.html']).toContain('Harbor Guide is offline'); expect(rendered['offline.html']).toContain('Harbor Lights Festival')
     expect(rendered['service-worker.js']).toContain('harbor-guide.staging-blue.shell-v1')
     expect(rendered['service-worker.js']).toContain('/brand/harbor-guide.png')
   })
 
   it('P2-T10 executes the generated install and activate lifecycle with scoped cache ownership', async () => {
-    const worker = (await renderStaticDeployment(syntheticDeploymentBranding, syntheticRoot))['service-worker.js']; const harness = generatedWorkerHarness(worker)
+    const worker = (await renderStaticDeployment(syntheticDeploymentBranding as Parameters<typeof renderStaticDeployment>[0], syntheticRoot))['service-worker.js']; const harness = generatedWorkerHarness(worker)
     harness.stores.set('third-party.cache-v1', new Map()); harness.stores.set('harbor-guide.other-deployment.shell-v1', new Map())
     harness.stores.set('harbor-guide.staging-blue.shell-v0', new Map()); harness.stores.set('harbor-guide.staging-blue.shell-v1', new Map())
     await harness.dispatch('install'); expect(harness.skipped()).toBe(true)
@@ -138,7 +138,7 @@ describe('Phase 2 deployment branding and static generation', () => {
   })
 
   it('executes generated fetch/message behavior without intercepting or caching API, chat, Edge Function, or query/hash assets', async () => {
-    const worker = (await renderStaticDeployment(syntheticDeploymentBranding, syntheticRoot))['service-worker.js']; const harness = generatedWorkerHarness(worker)
+    const worker = (await renderStaticDeployment(syntheticDeploymentBranding as Parameters<typeof renderStaticDeployment>[0], syntheticRoot))['service-worker.js']; const harness = generatedWorkerHarness(worker)
     const excluded = ['/api/events', '/chat', '/functions/v1/chat', '/assets/app.js?v=2', '/assets/app.css#theme']
     for (const path of excluded) {
       const result = await harness.dispatch('fetch', { request: new Request(`https://app.example${path}`, { method: 'GET' }) })
@@ -156,7 +156,7 @@ describe('Phase 2 deployment branding and static generation', () => {
   it('P2-T11 generation writes only to an explicit isolated build target and never mutates source/templates', async () => {
     const protectedPaths = ['index.html', 'templates/pwa/index.html', 'templates/pwa/offline.html', 'templates/pwa/service-worker.js.template', 'public/manifest.webmanifest', 'public/offline.html', 'public/service-worker.js']
     const before = await snapshot(protectedPaths); const target = await mkdtemp(join(tmpdir(), 'pwa-output-')); temporaryDirectories.push(target)
-    await expect(writeStaticDeployment(syntheticDeploymentBranding, syntheticRoot, target)).resolves.toBeDefined()
+    await expect(writeStaticDeployment(syntheticDeploymentBranding as Parameters<typeof writeStaticDeployment>[0], syntheticRoot, target)).resolves.toBeDefined()
     expect((await readdir(target)).sort()).toEqual(Object.values(OUTPUTS).sort()); await expectSnapshot(before)
     await expect(writeStaticDeployment(deploymentBranding, root, '')).rejects.toThrow('targetRoot is required')
   })
