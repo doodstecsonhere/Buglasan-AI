@@ -2,6 +2,7 @@ import type { Message, SourceCitation } from '../types'
 import type { ReactNode } from 'react'
 import { formatRelativeTime } from '../utils/dateUtils'
 import { trustedSourceUrl } from '../utils/chatThreads'
+import { productConfig } from '../config/productConfig'
 
 interface MessageBubbleProps {
   message: Message
@@ -15,7 +16,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && showAvatar && (
-        <img className="message-avatar" src="/icons/icon-192.png" alt="Buglasan AI" />
+        <img className="message-avatar" src={productConfig.branding.assistantAvatarPath} alt={productConfig.branding.assistantAvatarAlt} />
       )}
       
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>

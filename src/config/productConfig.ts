@@ -1,3 +1,5 @@
+import { configuredProduct } from '../../config/product-config.mjs'
+
 export type ProductLanguageCode = 'en' | 'ceb' | 'fil'
 
 export interface ProductConfig {
@@ -41,7 +43,10 @@ export interface ProductConfig {
   }
   readonly branding: {
     readonly wordmark: string
+    readonly quickQuestions: readonly string[]
     readonly appIconPath: string
+    readonly assistantAvatarPath: string
+    readonly assistantAvatarAlt: string
   }
   readonly chatPolicy: {
     readonly conversationHistoryLimit: number
@@ -60,69 +65,6 @@ export interface ProductConfig {
     }
   }
 }
-
-// This checked-in object is the production deployment boundary. It deliberately
-// reads no environment variables and contains no credentials or demo fallback.
-const configuredProduct = {
-  identity: {
-    assistantName: 'Buglasan AI',
-    festivalName: 'Buglasan Festival',
-    festivalShortName: 'Buglasan',
-    description: 'A multilingual, year-aware AI companion for the Buglasan Festival of Negros Oriental',
-    aliases: ['Buglasan', 'Buglasan Festival'],
-    vocabulary: ['festival', 'schedule', 'event', 'announcement', 'registration'],
-  },
-  languages: {
-    default: 'en',
-    supported: [
-      { code: 'en', displayLabel: 'English', browserPrefixes: [] },
-      { code: 'ceb', displayLabel: 'Cebuano/Bisaya', browserPrefixes: ['ceb'] },
-      { code: 'fil', displayLabel: 'Filipino/Tagalog', browserPrefixes: ['fil', 'tl'] },
-    ],
-  },
-  officialSource: {
-    id: 'buglasan-facebook',
-    authorityLabel: 'Official',
-    pageLabel: 'Buglasan Festival Facebook Page',
-    url: 'https://www.facebook.com/Buglasan',
-  },
-  trust: {
-    aiDisclaimer: 'Buglasan AI may occasionally get details wrong.',
-    nonAffiliationNotice: 'Data sourced from official channels. Not affiliated with the Provincial Government of Negros Oriental.',
-  },
-  regional: {
-    timeZone: 'Asia/Manila',
-    clockConversionLocale: 'en-US',
-    displayLocale: 'en-PH',
-  },
-  eventCycle: {
-    yearBoundary: 'calendar-year',
-    queryYearMin: 2020,
-    queryYearMax: 2030,
-    typicalStart: { monthIndex: 9, day: 15 },
-    typicalEnd: { monthIndex: 9, day: 25 },
-  },
-  branding: {
-    wordmark: 'BUGLASAN AI',
-    appIconPath: '/icons/icon-192.png',
-  },
-  chatPolicy: {
-    conversationHistoryLimit: 6,
-    composerMaxLength: 2000,
-    threadTitleMaxLength: 48,
-    offlineEventLimit: 6,
-  },
-  persistence: {
-    namespace: 'buglasan-ai',
-    chatThreadsStorageKey: 'buglasan-ai.chat-threads.v1',
-    installDismissedStorageKey: 'buglasan-install-dismissed',
-    offlineKnowledge: {
-      databaseName: 'buglasan-ai-offline-knowledge',
-      storeName: 'verified-snapshots',
-      databaseVersion: 1,
-    },
-  },
-} satisfies ProductConfig
 
 function invalid(path: string, requirement: string): never {
   throw new Error(`Invalid product configuration at ${path}: ${requirement}`)
@@ -225,9 +167,13 @@ export function assertValidProductConfig(input: unknown): asserts input is Produ
   const typicalEnd = calendarPoint(eventCycle.typicalEnd, 'eventCycle.typicalEnd')
   if (typicalStart.monthIndex * 32 + typicalStart.day > typicalEnd.monthIndex * 32 + typicalEnd.day) invalid('eventCycle.typicalStart', 'must not be after eventCycle.typicalEnd')
 
-  const branding = objectAt(root.branding, 'branding', ['wordmark', 'appIconPath'])
+  const branding = objectAt(root.branding, 'branding', ['wordmark', 'quickQuestions', 'appIconPath', 'assistantAvatarPath', 'assistantAvatarAlt'])
   trimmedString(branding.wordmark, 'branding.wordmark')
-  if (!SAFE_PATH.test(trimmedString(branding.appIconPath, 'branding.appIconPath'))) invalid('branding.appIconPath', 'must be a safe root-relative path')
+  stringArray(branding.quickQuestions, 'branding.quickQuestions')
+  trimmedString(branding.assistantAvatarAlt, 'branding.assistantAvatarAlt')
+  for (const key of ['appIconPath', 'assistantAvatarPath'] as const) {
+    if (!SAFE_PATH.test(trimmedString(branding[key], `branding.${key}`))) invalid(`branding.${key}`, 'must be a safe root-relative path')
+  }
 
   const chatPolicy = objectAt(root.chatPolicy, 'chatPolicy', ['conversationHistoryLimit', 'composerMaxLength', 'threadTitleMaxLength', 'offlineEventLimit'])
   for (const key of ['conversationHistoryLimit', 'composerMaxLength', 'threadTitleMaxLength', 'offlineEventLimit'] as const) positiveInteger(chatPolicy[key], `chatPolicy.${key}`)

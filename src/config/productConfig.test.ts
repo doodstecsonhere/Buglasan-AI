@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assertValidProductConfig, defineProductConfig, productConfig, type ProductConfig } from './productConfig'
+import { deploymentBranding } from '../../config/deployment-branding.mjs'
 
 const cloneConfig = (): ProductConfig => structuredClone(productConfig)
 const mutate = (config: ProductConfig) => config as unknown as Record<string, any>
@@ -32,8 +33,24 @@ describe('productConfig Phase 1 boundary', () => {
   })
 
   it('P5 preserves app branding references and behavior limits', () => {
-    expect(productConfig.branding).toEqual({ wordmark: 'BUGLASAN AI', appIconPath: '/icons/icon-192.png' })
+    expect(productConfig.branding).toEqual({
+      wordmark: 'BUGLASAN AI',
+      quickQuestions: ['What are the Buglasan events for today?', 'What are the Buglasan events tomorrow?', "What's the latest update?"],
+      appIconPath: '/icons/icon-192.png', assistantAvatarPath: '/icons/icon-192.png', assistantAvatarAlt: 'Buglasan AI',
+    })
     expect(productConfig.chatPolicy).toEqual({ conversationHistoryLimit: 6, composerMaxLength: 2000, threadTitleMaxLength: 48, offlineEventLimit: 6 })
+  })
+
+  it('P5b shares browser and static deployment identity without duplication', () => {
+    expect(deploymentBranding.product).toMatchObject({
+      assistantName: productConfig.identity.assistantName,
+      eventName: productConfig.identity.festivalName,
+      eventShortName: productConfig.identity.festivalShortName,
+      officialUrl: productConfig.officialSource.url,
+      wordmark: productConfig.branding.wordmark,
+      avatarPath: productConfig.branding.assistantAvatarPath,
+    })
+    expect(deploymentBranding.deployment.storageNamespace).toBe(productConfig.persistence.namespace)
   })
 
   it('P6 preserves the stable storage namespace and existing identifiers', () => {

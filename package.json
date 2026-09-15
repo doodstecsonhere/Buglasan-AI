@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "generate:pwa": "node scripts/generate-pwa-static.mjs",
     "build": "tsc -b && vite build",
     "verify:demo-build-separation": "node scripts/verify-demo-bundle-separation.mjs",
     "typecheck": "tsc -b --pretty false",

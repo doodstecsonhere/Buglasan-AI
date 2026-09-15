@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="{{HTML_LANGUAGE}}">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="{{FAVICON}}" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="{{HTML_DESCRIPTION}}" />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="{{THEME_COLOR}}" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="{{NAME}}" />
+
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="{{NAME}}" />
+    <link rel="apple-touch-icon" sizes="180x180" href="{{APPLE_TOUCH_ICON}}" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="{{NAME}}" />
+    <meta property="og:site_name" content="{{EVENT_NAME}}" />
+    <meta property="og:description" content="{{SOCIAL_DESCRIPTION}}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="{{OFFICIAL_URL}}" />
+    <meta property="og:image" content="{{LOGO}}" />
+    <meta property="og:locale" content="{{OPEN_GRAPH_LOCALE}}" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="me" href="{{OFFICIAL_URL}}" />
+
+    <title>{{NAME}}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
