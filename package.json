@@ -8,6 +8,8 @@
     "generate:pwa": "node scripts/generate-pwa-static.mjs",
     "build": "tsc -b && vite build",
     "verify:demo-build-separation": "node scripts/verify-demo-bundle-separation.mjs",
+    "release:validate": "node scripts/package-event-release.mjs --validate",
+    "release:package": "npm run build && node scripts/package-event-release.mjs --write",
     "typecheck": "tsc -b --pretty false",
     "lint": "oxlint",
     "preview": "vite preview",
