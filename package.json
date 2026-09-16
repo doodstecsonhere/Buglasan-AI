@@ -18,6 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "source-inbox": "vite-node scripts/source-inbox.ts",
+    "source-inbox:web": "vite-node scripts/source-inbox-web.ts",
     "smoke:rag:live": "node --experimental-strip-types scripts/seed-smoke-test.ts --acceptance",
     "smoke:rag:cleanup": "node --experimental-strip-types scripts/seed-smoke-test.ts --cleanup",
     "source:acceptance": "node --experimental-strip-types scripts/source-collector-live.ts --acceptance",
@@ -44,9 +46,9 @@
     "orchestration:acceptance": "node --experimental-strip-types scripts/orchestration-live.ts --acceptance",
     "pipeline:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --acceptance",
     "pipeline:diagnostic-chat": "node --env-file=.env.local --experimental-strip-types scripts/orchestration-live.ts --diagnostic-chat",
-    "pipeline:cleanup": "node --experimental-strip-types scripts/orchestration-live.ts --cleanup"
-    ,"gate-b:n8n:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --acceptance"
-    ,"gate-b:n8n:cleanup": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --cleanup"
+    "pipeline:cleanup": "node --experimental-strip-types scripts/orchestration-live.ts --cleanup",
+    "gate-b:n8n:acceptance": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --acceptance",
+    "gate-b:n8n:cleanup": "node --env-file=.env.local --experimental-strip-types scripts/gate-b-n8n-acceptance.ts --cleanup"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -54,6 +56,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -65,8 +68,10 @@
     "oxlint": "^1.79.0",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
+    "tesseract.js": "^6.0.1",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",
+    "vite-node": "^3.2.4",
     "vitest": "^3.2.4"
   }
 }

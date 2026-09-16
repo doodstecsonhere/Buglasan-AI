@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { analyzeSourceInbox, approveSourceInboxPreview, deterministicLocalImageProvider, type MediaAnalysisProvider } from './sourceInbox'
+import { readFile } from 'node:fs/promises'
+import { createWorker } from 'tesseract.js'
+import localEnglishData from '@tesseract.js-data/eng'
+import { analyzeSourceInbox, approveSourceInboxPreview, createOfflineTesseractImageProvider, deterministicLocalImageProvider, type MediaAnalysisProvider } from './sourceInbox'
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])
 const input = (images = [{ name: 'poster.png', mimeType: 'image/png', bytes: png }], operatorCaption: string | null = 'Official schedule') => ({ facebookPostUrl: 'https://www.facebook.com/Buglasan/posts/123', images, operatorCaption, collectedAt: '2026-09-16T00:00:00.000Z' })
@@ -19,10 +22,31 @@ describe('local trusted image source inbox', () => {
 
   it('accepts multiple images and records provider errors as partial failures', async () => {
     const provider: MediaAnalysisProvider = { ...deterministicLocalImageProvider, async analyzeImage(image, _bytes, time) { if (image.name === 'bad.png') throw new Error('offline fixture failure'); return deterministicLocalImageProvider.analyzeImage(image, _bytes, time) } }
-    const preview = await analyzeSourceInbox(input([{ name: 'good.png', mimeType: 'image/png', bytes: png }, { name: 'bad.png', mimeType: 'image/png', bytes: png }], null), provider)
+    const preview = await analyzeSourceInbox(input([{ name: 'good.png', mimeType: 'image/png', bytes: png }, { name: 'bad.png', mimeType: 'image/png', bytes: new Uint8Array([...png, 1]) }], null), provider)
     expect(preview.image_evidence).toHaveLength(2)
     expect(preview.analyses.map((analysis) => analysis.failure)).toEqual([null, 'offline fixture failure'])
     expect(preview.source_type).toBe('image')
+  })
+
+  it('runs bounded local OCR through an injected offline Tesseract-compatible recognizer without mutating the collector', async () => {
+    const recognize = vi.fn(async (_bytes: Uint8Array) => ({ data: { text: '  Hibalag\nSchedule  ', confidence: 87.5 } }))
+    const preview = await analyzeSourceInbox(input(), createOfflineTesseractImageProvider({ recognize }))
+    expect(recognize).toHaveBeenCalledOnce()
+    expect(preview.analyses[0]).toMatchObject({ provider: 'tesseract.js-local', provider_version: '6-compatible', method: 'ocr', confidence: 87.5, granularity: 'document', text_state: 'text', ocr_text: 'Hibalag Schedule', review_state: 'needs_review', warnings: ['OCR is machine-generated and must be checked against the source image.'] })
+    expect(preview.image_evidence[0]).toMatchObject({ duplicate_of: null, validation: 'accepted' })
+    expect(preview.requires_ocr_review).toBe(true)
+    expect(() => approveSourceInboxPreview(preview, vi.fn())).toThrow(/explicit operator confirmation/)
+    expect(() => approveSourceInboxPreview(preview, vi.fn(), { confirmOcrReview: true })).not.toThrow()
+  })
+
+  it('deduplicates byte-identical images before OCR and retains bounded validation failures', async () => {
+    const provider = { ...deterministicLocalImageProvider, analyzeImage: vi.fn(deterministicLocalImageProvider.analyzeImage) }
+    const preview = await analyzeSourceInbox(input([{ name: 'one.png', mimeType: 'image/png', bytes: png }, { name: 'two.png', mimeType: 'image/png', bytes: png }], null), provider)
+    expect(preview.image_evidence.map((image) => image.validation)).toEqual(['accepted', 'rejected'])
+    expect(preview.image_evidence[1]).toMatchObject({ duplicate_of: preview.image_evidence[0].sha256, failure: 'duplicate image bytes' })
+    expect(provider.analyzeImage).toHaveBeenCalledOnce()
+    await expect(analyzeSourceInbox({ ...input(), collectedAt: 'not-a-date' })).rejects.toThrow(/ISO-8601/)
+    await expect(analyzeSourceInbox({ ...input(), operatorCaption: 'a'.repeat(12_001) })).rejects.toThrow(/12000/)
   })
 
   it('rejects dangerous or malformed inputs and distinguishes caption-only and reference-only', async () => {
@@ -43,4 +67,31 @@ describe('local trusted image source inbox', () => {
     expect(first.replay_key).toBe(replay.replay_key)
     expect(JSON.stringify(first)).not.toMatch(/secret|token|apikey/i)
   })
+
+  it('retains OCR warning, timestamp, hash, provider, version, confidence, and granularity on every outcome', async () => {
+    const provider: MediaAnalysisProvider = { ...deterministicLocalImageProvider, async analyzeImage() { throw new Error('recognizer unavailable') } }
+    const preview = await analyzeSourceInbox(input([{ name: 'failure.png', mimeType: 'image/png', bytes: png }], null), provider)
+    expect(preview.analyses[0]).toMatchObject({
+      image_sha256: preview.image_evidence[0].sha256,
+      provider: 'deterministic-local',
+      provider_version: '1',
+      analyzed_at: '2026-09-16T00:00:00.000Z',
+      confidence: null,
+      granularity: 'unknown',
+      review_state: 'failed',
+      warnings: ['OCR could not be completed for this image.'],
+      failure: 'recognizer unavailable',
+    })
+  })
+
+  it('recognizes the known text in a deterministic local PNG through real offline Tesseract processing', async () => {
+    const worker = await createWorker('eng', 1, { langPath: localEnglishData.langPath, cacheMethod: 'none' })
+    try {
+      const fixture = new Uint8Array(await readFile('test/fixtures/source-inbox-known-text.png'))
+      const preview = await analyzeSourceInbox(input([{ name: 'source-inbox-known-text.png', mimeType: 'image/png', bytes: fixture }], null), createOfflineTesseractImageProvider({ recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) }))
+      expect(preview.analyses[0]).toMatchObject({ provider: 'tesseract.js-local', method: 'ocr', text_state: 'text', review_state: 'needs_review', ocr_text: expect.stringMatching(/BUGLASAN OCR TEST/i) })
+    } finally {
+      await worker.terminate()
+    }
+  }, 30_000)
 })
