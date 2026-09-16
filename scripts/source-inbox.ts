@@ -21,7 +21,7 @@ function options(name: string): string[] {
 }
 
 function usage(): never {
-  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...|https://www.facebook.com/reel/<id>> [--image <local-file>] [--video <local-file>] [--caption <text>] [--festival-year <year>] [--approve --confirm-official-buglasan-source]')
+  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...|https://www.facebook.com/reel/<id>> [--image <local-file>] [--video <local-file>] [--caption <text> | --caption-file <local-utf8-file>] [--festival-year <year>] [--approve --confirm-official-buglasan-source]')
 }
 
 function videoMimeTypeFor(path: string): SourceInboxVideo['mimeType'] {
@@ -42,12 +42,16 @@ function mimeTypeFor(path: string): SourceInboxImage['mimeType'] {
 const postUrl = option('--post-url') ?? usage()
 const imagePaths = options('--image')
 const videoPaths = options('--video')
-if (imagePaths.length + videoPaths.length === 0 && option('--caption') === null) usage()
+const caption = option('--caption')
+const captionFilePath = option('--caption-file')
+if (process.argv.includes('--caption') && process.argv.includes('--caption-file')) throw new Error('Specify either --caption or --caption-file, not both')
+if (imagePaths.length + videoPaths.length === 0 && caption === null && captionFilePath === null) usage()
+const operatorCaption = captionFilePath === null ? caption : await readFile(resolve(captionFilePath), 'utf8')
 const langPath = process.env.SOURCE_INBOX_TESSDATA_PATH ?? localEnglishData.langPath
 
 const localWorkerPath = process.env.SOURCE_INBOX_TESSERACT_WORKER_PATH
 const localCorePath = process.env.SOURCE_INBOX_TESSERACT_CORE_PATH
-const worker = await createWorker('eng', 1, {
+const worker = imagePaths.length + videoPaths.length === 0 ? null : await createWorker('eng', 1, {
   langPath: resolve(langPath),
   cacheMethod: 'none',
   ...(localWorkerPath ? { workerPath: localWorkerPath } : {}),
@@ -66,11 +70,11 @@ try {
     bytes: new Uint8Array(await readFile(resolve(path))),
   })))
   const festivalYear = option('--festival-year')
-  const imageProvider = createOfflineTesseractImageProvider({ recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) })
-  const provider = videos.length > 0 ? createLocalVideoProvider({ tools: requiredAbsoluteVideoToolPaths(), recognizer: { recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) } }) : imageProvider
+  const imageProvider = worker === null ? undefined : createOfflineTesseractImageProvider({ recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) })
+  const provider = worker === null ? undefined : videos.length > 0 ? createLocalVideoProvider({ tools: requiredAbsoluteVideoToolPaths(), recognizer: { recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) } }) : imageProvider
   const preview = await analyzeSourceInbox({
     facebookPostUrl: postUrl,
-    operatorCaption: option('--caption'),
+    operatorCaption,
     images,
     videos,
     collectedAt: new Date().toISOString(),
@@ -85,5 +89,5 @@ try {
     process.stdout.write(`${JSON.stringify(preview, null, 2)}\n`)
   }
 } finally {
-  await worker.terminate()
+  await worker?.terminate()
 }
