@@ -28,4 +28,11 @@ describe('local Source Inbox web server', () => {
     expect(invalid.status).toBe(400)
     await expect(invalid.json()).resolves.toMatchObject({ error: expect.stringMatching(/base64/) })
   })
+
+  it('keeps confirmation server-side and rejects unknown or unconfirmed previews', async () => {
+    server = await startSourceInboxWebServer({ provider: deterministicLocalImageProvider })
+    const response = await fetch(`${server.url}api/production-confirmation`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replayKey: 'unknown', confirmProduction: true }) })
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ error: expect.stringMatching(/Preview is unavailable/) })
+  })
 })
