@@ -1,4 +1,4 @@
-# Image Source Inbox
+# Local Multimodal Source Inbox
 
 ## Access and boundary
 
@@ -12,7 +12,7 @@ For the local operator interface, run `npm run source-inbox:web`, then open `htt
 
 The terminal command reads selected files into memory, does not create temporary files, binds no socket, and does not contact Facebook, an OCR provider, or any other remote service. The web command holds browser-uploaded bytes only in process memory for the analysis request and returns only the hash-based preview; it does not persist images. Stop either local command with `Ctrl+C`; do this before any production deployment or environment switch. The web UI binds **only** to `127.0.0.1` and deliberately has no dispatcher, server secret, browser credential, PWA route, service-worker registration, or production request path.
 
-Only an HTTPS official `facebook.com/Buglasan` post reference, an optional caption of at most 12,000 characters, and 0–8 local JPEG, PNG, or WebP images up to 8 MiB each are accepted. Image names are bounded to 256 characters; MIME declaration and binary signature are both checked. Empty, malformed, unsupported, oversized, byte-identical duplicate, credential-bearing, non-HTTPS/non-Facebook, and non-Buglasan references are rejected. This fixed Buglasan boundary is not a generic-event configuration path. The inbox never fetches, scrapes, downloads, parses Facebook pages/oEmbed/DOM, or processes video.
+Only an HTTPS official `facebook.com/Buglasan` post reference, an optional caption of at most 12,000 characters, 0–8 local JPEG, PNG, or WebP images up to 8 MiB each, and **one** local MP4 (WebM only where the installed local tools support it) up to 256 MiB are accepted. A video must have a matching byte signature, a declared accepted MIME type, an ffprobe-reported video stream, and duration at most 15 minutes. Names are bounded to 256 characters. Empty, malformed, unsupported, oversized, byte-identical duplicate, credential-bearing, non-HTTPS/non-Facebook, and non-Buglasan references are rejected. This fixed Buglasan boundary is not a generic-event configuration path. The inbox never fetches, scrapes, downloads, parses Facebook pages/oEmbed/DOM, or accepts a URL as media input.
 
 ## Analyze, preview, approval, and failures
 
@@ -20,8 +20,16 @@ Analysis is non-mutating. The preview preserves the original operator caption se
 
 Approval maps the preview through the existing adapter and [`ingestGenericCollectorRecord()`](../src/ingestion/genericCollectorIngress.ts:102), whose supplied trusted dispatcher must ultimately use the established `ingest_source` owner. Image bytes are never uploaded by this capability; only hash-based evidence/provenance is forwarded. The deterministic replay key makes an identical reference/caption/image set produce a stable collector identity. The existing collector fingerprint determines whether approval is an insert, update, or no-op replay.
 
-## Freshness and future media
+## Local video checkpoint
+
+Video is a Node-only local capability. Pass `--video C:\operator-files\schedule.mp4` to `npm run source-inbox`; the loopback page has the same local file selector. Video use is blocked unless the four executable/model variables are explicit **absolute** paths and `SOURCE_INBOX_WHISPER_MODEL_SHA256` matches the installed model: `SOURCE_INBOX_FFPROBE_PATH`, `SOURCE_INBOX_FFMPEG_PATH`, `SOURCE_INBOX_WHISPER_CPP_PATH`, `SOURCE_INBOX_WHISPER_MODEL_PATH`, and `SOURCE_INBOX_WHISPER_MODEL_SHA256`. The provider never searches `PATH`, downloads an executable or model, reads production credentials, calls a remote API, or retains a media URL.
+
+For each accepted file it writes bytes only to an automatically removed, uniquely named OS-temporary workspace, with fixed internal filenames and strict `finally` cleanup. It calls local `ffprobe` to require a playable video stream and duration, local `ffmpeg` to select up to 12 review frames at start/title/end and periodic 30-second safety timestamps (deduplicated by SHA-256), and a mono 16 kHz WAV only where audio exists. Each extracted frame passes through the established local Tesseract adapter. whisper.cpp parses its local JSON output to preserve segment timestamps. Each tool uses fixed argv, `shell: false`, a timeout, and capped output. No-audio video is valid. The documented CPU-viable baseline is local `ggml-base.en`; it is English-oriented, has known Cebuano/Filipino accuracy limitations, and does not translate.
+
+The stable video derivative uses exactly `[SPEECH hh:mm:ss.mmm-hh:mm:ss.mmm]` and `[FRAME hh:mm:ss.mmm OCR]` labels. It remains separate from operator caption/original text and is the deterministic citeable text passed into the existing ingress only after review approval. Operator caption is retained as operator provenance—not asserted as Facebook content. A lack of useful visual text succeeds with a warning. Tool/probe/extraction/transcription failures are captured per video and cannot become usable source content.
+
+## Freshness
 
 Analysis, failed validation/provider work, reference-only previews, and unchanged replays do not call the collector and therefore cannot advance knowledge-base freshness. Only a changed, approved source accepted by the existing pipeline is eligible to affect downstream freshness according to existing semantics.
 
-[`MediaAnalysisProvider`](../src/ingestion/sourceInbox.ts:61) has an optional video seam for a future trusted workflow, but video remains rejected and no video implementation, live AI provider, deployment, n8n activation, or production mutation is part of this checkpoint.
+Approval remains a local payload preparation boundary. This checkpoint introduces no deployment, n8n activation, migration, provider account, production credential, or production mutation.

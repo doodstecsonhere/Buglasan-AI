@@ -2,11 +2,13 @@ import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { createWorker } from 'tesseract.js'
 import localEnglishData from '@tesseract.js-data/eng'
+import { createLocalVideoProvider, requiredAbsoluteVideoToolPaths } from './local-video-provider.ts'
 import {
   analyzeSourceInbox,
   approveSourceInboxPreview,
   createOfflineTesseractImageProvider,
   type SourceInboxImage,
+  type SourceInboxVideo,
 } from '../src/ingestion/sourceInbox.ts'
 
 function option(name: string): string | null {
@@ -19,7 +21,14 @@ function options(name: string): string[] {
 }
 
 function usage(): never {
-  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...> --image <local-file> [--image <local-file>] [--caption <text>] [--festival-year <year>] [--approve]')
+  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...> [--image <local-file>] [--video <local-file>] [--caption <text>] [--festival-year <year>] [--approve]')
+}
+
+function videoMimeTypeFor(path: string): SourceInboxVideo['mimeType'] {
+  const extension = path.split('.').pop()?.toLowerCase()
+  if (extension === 'mp4') return 'video/mp4'
+  if (extension === 'webm') return 'video/webm'
+  throw new Error(`Only MP4 and WebM files are supported: ${path}`)
 }
 
 function mimeTypeFor(path: string): SourceInboxImage['mimeType'] {
@@ -32,7 +41,8 @@ function mimeTypeFor(path: string): SourceInboxImage['mimeType'] {
 
 const postUrl = option('--post-url') ?? usage()
 const imagePaths = options('--image')
-if (imagePaths.length === 0) usage()
+const videoPaths = options('--video')
+if (imagePaths.length + videoPaths.length === 0 && option('--caption') === null) usage()
 const langPath = process.env.SOURCE_INBOX_TESSDATA_PATH ?? localEnglishData.langPath
 
 const localWorkerPath = process.env.SOURCE_INBOX_TESSERACT_WORKER_PATH
@@ -50,14 +60,22 @@ try {
     mimeType: mimeTypeFor(path),
     bytes: new Uint8Array(await readFile(resolve(path))),
   })))
+  const videos: SourceInboxVideo[] = await Promise.all(videoPaths.map(async (path) => ({
+    name: basename(path),
+    mimeType: videoMimeTypeFor(path),
+    bytes: new Uint8Array(await readFile(resolve(path))),
+  })))
   const festivalYear = option('--festival-year')
+  const imageProvider = createOfflineTesseractImageProvider({ recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) })
+  const provider = videos.length > 0 ? createLocalVideoProvider({ tools: requiredAbsoluteVideoToolPaths(), recognizer: { recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) } }) : imageProvider
   const preview = await analyzeSourceInbox({
     facebookPostUrl: postUrl,
     operatorCaption: option('--caption'),
     images,
+    videos,
     collectedAt: new Date().toISOString(),
     festivalYear: festivalYear === null ? null : Number(festivalYear),
-  }, createOfflineTesseractImageProvider({ recognize: async (bytes) => worker.recognize(Buffer.from(bytes)) }))
+  }, provider)
 
   if (process.argv.includes('--approve')) {
     // This command never has collector credentials. It maps the explicitly approved

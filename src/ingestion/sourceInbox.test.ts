@@ -49,6 +49,29 @@ describe('local trusted image source inbox', () => {
     await expect(analyzeSourceInbox({ ...input(), operatorCaption: 'a'.repeat(12_001) })).rejects.toThrow(/12000/)
   })
 
+  it('accepts signed local video only through an injected provider and requires review of generated material', async () => {
+    const mp4 = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0])
+    const provider: MediaAnalysisProvider = {
+      ...deterministicLocalImageProvider,
+      async analyzeVideo(video, _bytes, analyzedAt) {
+        return { video_sha256: video.sha256, provider: 'local-fixture', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: 'needs_review', transcript_state: 'text', transcript: 'Hibalag schedule', duration_seconds: 3, frame_count: 1, frame_analyses: [], derived_evidence: '[SPEECH 00:00:00.000-00:00:03.000] Hibalag schedule', observations: ['Fixture only'], warnings: ['Review required'], failure: null }
+      },
+    }
+    const preview = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'schedule.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, provider)
+    expect(preview).toMatchObject({ source_type: 'video', status: 'ready_for_approval', requires_ocr_review: true, video_evidence: [{ validation: 'accepted' }], video_analyses: [{ transcript: 'Hibalag schedule', frame_count: 1 }] })
+    expect(() => approveSourceInboxPreview(preview, vi.fn())).toThrow(/explicit operator confirmation/)
+  })
+
+  it('rejects malformed videos and does not treat an unavailable video provider as usable content', async () => {
+    const malformed = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'bad.mp4', mimeType: 'video/mp4', bytes: new Uint8Array([1, 2]) }] })
+    expect(malformed).toMatchObject({ status: 'failed', video_evidence: [{ validation: 'rejected', failure: expect.stringMatching(/signature/) }] })
+    const quicktime = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'legacy.mov', mimeType: 'video/quicktime', bytes: new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109]) }] })
+    expect(quicktime).toMatchObject({ status: 'failed', video_evidence: [{ validation: 'rejected', failure: expect.stringMatching(/MIME type/) }] })
+    const mp4 = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0])
+    const unavailable = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'video.mp4', mimeType: 'video/mp4', bytes: mp4 }] })
+    expect(unavailable).toMatchObject({ status: 'failed', video_analyses: [{ failure: 'local video provider is not configured' }] })
+  })
+
   it('rejects dangerous or malformed inputs and distinguishes caption-only and reference-only', async () => {
     const malformed = await analyzeSourceInbox(input([{ name: 'evil.png', mimeType: 'image/png', bytes: new Uint8Array([1]) }], null))
     expect(malformed.status).toBe('failed')

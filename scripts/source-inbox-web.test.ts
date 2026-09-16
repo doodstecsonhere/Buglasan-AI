@@ -15,7 +15,7 @@ describe('local Source Inbox web server', () => {
     const response = await fetch(server.url)
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('content-security-policy')).toContain("default-src 'none'")
-    await expect(response.text()).resolves.toContain('Local Source Inbox')
+    await expect(response.text()).resolves.toContain('Videos (MP4, WebM; local tools required)')
   })
 
   it('analyzes supplied local bytes without dispatch and rejects malformed web input', async () => {
