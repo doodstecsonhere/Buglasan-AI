@@ -21,7 +21,7 @@ function options(name: string): string[] {
 }
 
 function usage(): never {
-  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...> [--image <local-file>] [--video <local-file>] [--caption <text>] [--festival-year <year>] [--approve]')
+  throw new Error('Usage: npm run source-inbox -- --post-url <https://www.facebook.com/Buglasan/...|https://www.facebook.com/reel/<id>> [--image <local-file>] [--video <local-file>] [--caption <text>] [--festival-year <year>] [--approve --confirm-official-buglasan-source]')
 }
 
 function videoMimeTypeFor(path: string): SourceInboxVideo['mimeType'] {
@@ -80,7 +80,7 @@ try {
   if (process.argv.includes('--approve')) {
     // This command never has collector credentials. It maps the explicitly approved
     // preview through sourceAdapter -> genericCollectorIngress and prints its payload.
-    process.stdout.write(`${JSON.stringify(approveSourceInboxPreview(preview, (payload) => payload, { confirmOcrReview: true }), null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify(approveSourceInboxPreview(preview, (payload) => payload, { confirmOcrReview: true, confirmOfficialBuglasanSource: process.argv.includes('--confirm-official-buglasan-source') }), null, 2)}\n`)
   } else {
     process.stdout.write(`${JSON.stringify(preview, null, 2)}\n`)
   }

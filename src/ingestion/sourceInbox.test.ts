@@ -17,7 +17,8 @@ describe('local trusted image source inbox', () => {
     expect(dispatch).not.toHaveBeenCalled()
     const payload = approveSourceInboxPreview(preview, dispatch)
     expect(dispatch).toHaveBeenCalledOnce()
-    expect(payload.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Official schedule' } })
+    expect(payload.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Official schedule' }, source_adapter: { authority_official: true, provenance: 'operator_provided' } })
+    expect(payload.source_metadata.source_inbox).not.toHaveProperty('official_buglasan_source_verified')
   })
 
   it('accepts multiple images and records provider errors as partial failures', async () => {
@@ -36,7 +37,7 @@ describe('local trusted image source inbox', () => {
     expect(preview.image_evidence[0]).toMatchObject({ duplicate_of: null, validation: 'accepted' })
     expect(preview.requires_ocr_review).toBe(true)
     expect(() => approveSourceInboxPreview(preview, vi.fn())).toThrow(/explicit operator confirmation/)
-    expect(() => approveSourceInboxPreview(preview, vi.fn(), { confirmOcrReview: true })).not.toThrow()
+    expect(() => approveSourceInboxPreview(preview, vi.fn(), { confirmOcrReview: true, confirmOfficialBuglasanSource: true })).not.toThrow()
   })
 
   it('deduplicates byte-identical images before OCR and retains bounded validation failures', async () => {
@@ -77,11 +78,31 @@ describe('local trusted image source inbox', () => {
     expect(malformed.status).toBe('failed')
     expect(malformed.image_evidence[0].failure).toMatch(/signature mismatch/)
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'http://facebook.com/x' })).rejects.toThrow(/HTTPS/)
-    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/HarborDays/posts/123' })).rejects.toThrow(/official/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/HarborDays/posts/123' })).rejects.toThrow(/canonical/)
     expect((await analyzeSourceInbox(input([], 'Caption only'))).source_type).toBe('text')
     const reference = await analyzeSourceInbox(input([], null))
     expect(reference.status).toBe('reference_only')
     expect(() => approveSourceInboxPreview(reference, vi.fn())).toThrow(/Only usable/)
+  })
+
+  it('previews canonical reels structurally but requires an explicit official-source attestation before approval', async () => {
+    const reel = await analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://m.facebook.com/reel/123456789?fbclid=tracking' })
+    expect(reel.reference.post_url).toBe('https://www.facebook.com/reel/123456789/')
+    expect(() => approveSourceInboxPreview(reel, vi.fn())).toThrow(/Official Buglasan source identity/)
+    const dispatch = vi.fn((payload) => payload)
+    const approved = approveSourceInboxPreview(reel, dispatch, { confirmOfficialBuglasanSource: true })
+    expect(approved.source_metadata).toMatchObject({ source_inbox: { official_buglasan_source_verified: true } })
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/' })).rejects.toThrow(/canonical/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reels/123' })).rejects.toThrow(/canonical/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/OtherPage/reel/123' })).rejects.toThrow(/canonical/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/not-a-number/' })).rejects.toThrow(/numeric/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123/extra' })).rejects.toThrow(/suffixes/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123#fragment' })).rejects.toThrow(/suffixes/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com:444/reel/123/' })).rejects.toThrow(/ports/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://operator:secret@www.facebook.com/reel/123/' })).rejects.toThrow(/credentials/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com.evil.example/reel/123/' })).rejects.toThrow(/canonical/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123https://evil.example/' })).rejects.toThrow(/numeric/)
+    await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123?next=https%3A%2F%2Fevil.example' })).rejects.toThrow(/embedded URLs/)
   })
 
   it('has stable replay identity and does not expose a generic configuration or secret path', async () => {

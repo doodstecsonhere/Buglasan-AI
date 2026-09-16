@@ -159,11 +159,19 @@ function validFacebookUrl(value: string): string {
     const url = new URL(value)
     const hostname = url.hostname.toLowerCase()
     const isOfficialBuglasanPath = /^\/Buglasan(?:\/|$)/i.test(url.pathname)
-    if (url.protocol !== 'https:' || url.username || url.password || (hostname !== 'facebook.com' && hostname !== 'www.facebook.com' && hostname !== 'm.facebook.com') || !isOfficialBuglasanPath) throw new Error()
+    const reelMatch = /^\/reel\/(\d+)\/?$/.exec(url.pathname)
+    const isFacebookHost = hostname === 'facebook.com' || hostname === 'www.facebook.com' || hostname === 'm.facebook.com'
+    if (url.protocol !== 'https:' || url.username || url.password || !isFacebookHost || (!isOfficialBuglasanPath && reelMatch === null)) throw new Error()
+    if (reelMatch !== null && (url.port || url.hash !== '' || /https?:/i.test(decodeURIComponent(url.search)))) throw new Error()
+    if (reelMatch !== null) return `https://www.facebook.com/reel/${reelMatch[1]}/`
     return url.toString()
   } catch {
-    throw new SourceInboxValidationError('facebookPostUrl must be an HTTPS official facebook.com/Buglasan URL without embedded credentials')
+    throw new SourceInboxValidationError('facebookPostUrl must be an HTTPS facebook.com/Buglasan URL or canonical facebook.com/reel/<numeric-id> URL without credentials, ports, suffixes, or embedded URLs')
   }
+}
+
+function isCanonicalFacebookReelUrl(value: string): boolean {
+  return /^https:\/\/www\.facebook\.com\/reel\/\d+\/$/.test(value)
 }
 
 function hasSignature(mimeType: string, bytes: Uint8Array): boolean {
@@ -314,12 +322,15 @@ function failedVideoAnalysis(video: VideoEvidence, provider: MediaAnalysisProvid
 }
 
 /** Explicit approval is the sole point that delegates to the established collector ingress. */
-export function approveSourceInboxPreview<Result>(preview: SourceInboxPreview, dispatch: SourceCollectorDispatch<Result>, options: { readonly confirmOcrReview?: boolean } = {}): Result {
+export function approveSourceInboxPreview<Result>(preview: SourceInboxPreview, dispatch: SourceCollectorDispatch<Result>, options: { readonly confirmOcrReview?: boolean; readonly confirmOfficialBuglasanSource?: boolean } = {}): Result {
   if (!preview.usable_content || preview.status !== 'ready_for_approval') throw new SourceInboxValidationError('Only usable, analyzed previews can be approved')
   if (preview.requires_ocr_review && options.confirmOcrReview !== true) throw new SourceInboxValidationError('OCR output requires explicit operator confirmation before approval')
+  const isReel = isCanonicalFacebookReelUrl(preview.reference.post_url)
+  if (isReel && options.confirmOfficialBuglasanSource !== true) throw new SourceInboxValidationError('Official Buglasan source identity requires explicit operator confirmation before approval')
   const metadata: JsonObject = {
     source_inbox: {
       replay_key: preview.replay_key,
+      ...(isReel ? { official_buglasan_source_verified: true } : {}),
       operator_caption: preview.operator_caption,
       image_evidence: preview.image_evidence.map((image) => ({ ...image })),
       analyses: preview.analyses.map((analysis) => ({ ...analysis })),
