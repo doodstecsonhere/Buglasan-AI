@@ -305,8 +305,11 @@ export async function analyzeSourceInbox(input: SourceInboxInput, provider: Medi
   }))
   const acceptedImages = evidence.filter((image) => image.validation === 'accepted')
   const acceptedVideos = videoEvidence.filter((video) => video.validation === 'accepted' && videoAnalyses.some((analysis) => analysis.video_sha256 === video.sha256 && analysis.failure === null))
-  const usableContent = caption !== null || acceptedImages.length > 0 || acceptedVideos.length > 0
-  const status = !usableContent ? evidence.length + videoEvidence.length === 0 ? 'reference_only' : 'failed' : 'ready_for_approval'
+  // A failed video analysis may retain diagnostic frame evidence, but it is never usable or approvable.
+  const videoAnalysisFailed = videoAnalyses.some((analysis) => analysis.failure !== null)
+  const videoHasDerivedText = videoAnalyses.some((analysis) => analysis.failure === null && analysis.derived_evidence.trim() !== '')
+  const usableContent = !videoAnalysisFailed && (caption !== null || acceptedImages.length > 0 || videoHasDerivedText)
+  const status = videoAnalysisFailed || !usableContent ? evidence.length + videoEvidence.length === 0 ? 'reference_only' : 'failed' : 'ready_for_approval'
   const requiresOcrReview = analyses.some((analysis) => analysis.review_state === 'needs_review') || videoAnalyses.some((analysis) => analysis.review_state === 'needs_review')
   const mediaKinds = Number(acceptedImages.length > 0) + Number(acceptedVideos.length > 0)
   const sourceType: SourceType = caption !== null && mediaKinds > 0 || mediaKinds > 1 ? 'mixed' : acceptedVideos.length ? 'video' : acceptedImages.length ? 'image' : caption !== null ? 'text' : 'link'

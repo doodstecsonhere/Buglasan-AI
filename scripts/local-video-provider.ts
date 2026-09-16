@@ -138,20 +138,30 @@ export function createLocalVideoProvider(options: LocalVideoProviderOptions): Me
           } catch { /* retain previously extracted evidence and continue sampling */ }
         }
         const hasAudio = probe.streams.some((stream) => stream.codec_type === 'audio')
-        let transcript: string | null = null; let transcriptSegments: { start: number; end: number; text: string }[] = []; const warnings: string[] = []
+        let transcript: string | null = null; let transcriptSegments: { start: number; end: number; text: string }[] = []; const warnings: string[] = []; let transcriptionFailure: string | null = null
         if (hasAudio) {
           onProgress?.({ stage: 'transcribing', completed: 0, total: null, message: 'Transcribing local audio with whisper.cpp' })
           try {
             await runtime.run(options.tools.ffmpegPath, ['-nostdin', '-v', 'error', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-y', audioPath])
             await runtime.run(options.tools.whisperCppPath, ['-m', options.tools.whisperModelPath, '-f', audioPath, '-oj', '-of', transcriptPath])
-            const parsed = JSON.parse(await runtime.readFile(`${transcriptPath}.json`, 'utf8')) as { transcription?: readonly { offsets?: { from?: number; to?: number }; text?: string }[] }
-            transcriptSegments = (parsed.transcription ?? []).flatMap((segment) => { const text = normalizedText(segment.text ?? ''); return text === null || !Number.isFinite(segment.offsets?.from) || !Number.isFinite(segment.offsets?.to) ? [] : [{ start: segment.offsets!.from! / 1000, end: segment.offsets!.to! / 1000, text }] })
+            const parsed: unknown = JSON.parse(await runtime.readFile(`${transcriptPath}.json`, 'utf8'))
+            if (parsed === null || typeof parsed !== 'object' || !Array.isArray((parsed as { transcription?: unknown }).transcription)) throw new Error('whisper.cpp JSON output did not contain a transcription array')
+            transcriptSegments = (parsed as { transcription: unknown[] }).transcription.map((segment) => {
+              if (segment === null || typeof segment !== 'object') throw new Error('whisper.cpp JSON output contained an invalid transcription segment')
+              const { offsets, text: rawText } = segment as { offsets?: unknown; text?: unknown }
+              if (offsets === null || typeof offsets !== 'object' || typeof (offsets as { from?: unknown }).from !== 'number' || typeof (offsets as { to?: unknown }).to !== 'number' || !Number.isFinite((offsets as { from: number }).from) || !Number.isFinite((offsets as { to: number }).to) || typeof rawText !== 'string') throw new Error('whisper.cpp JSON output contained an invalid transcription segment')
+              const text = normalizedText(rawText)
+              return text === null ? null : { start: (offsets as { from: number }).from / 1000, end: (offsets as { to: number }).to / 1000, text }
+            }).filter((segment): segment is { start: number; end: number; text: string } => segment !== null)
             transcript = normalizedText(transcriptSegments.map((segment) => segment.text).join(' '))
-          } catch { warnings.push('Local audio transcription failed; retained visual analysis.') }
+          } catch (error) {
+            transcriptionFailure = error instanceof Error ? error.message : 'unknown local transcription failure'
+            warnings.push('Local audio transcription failed; retained visual analysis for diagnostics only.')
+          }
         }
         const needsReview = transcript !== null || frames.some((frame) => frame.review_state === 'needs_review')
         onProgress?.({ stage: 'complete', completed: frames.length, total: frames.length, message: 'Local video analysis complete' })
-        return { video_sha256: video.sha256, provider: 'ffprobe-ffmpeg-whisper.cpp-local', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: needsReview ? 'needs_review' : 'not_required', transcript_state: transcript === null ? 'no_text' : 'text', transcript, duration_seconds: duration, frame_count: frames.length, frame_analyses: frames, derived_evidence: evidenceText(transcriptSegments, frames), observations: [`ffprobe reported ${duration.toFixed(2)} seconds.`, `Extracted ${frames.length} bounded review frame(s) locally.`], warnings: [...warnings, ...(hasAudio ? [] : ['No audio stream was present; transcription was not attempted.']), ...(frames.length === 0 ? ['No useful visual text was detected in selected frames.'] : []), ...(needsReview ? ['Machine-generated frame OCR and transcript require operator review before approval.'] : [])], failure: null }
+        return { video_sha256: video.sha256, provider: 'ffprobe-ffmpeg-whisper.cpp-local', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: transcriptionFailure === null ? needsReview ? 'needs_review' : 'not_required' : 'failed', transcript_state: transcriptionFailure === null ? transcript === null ? 'no_text' : 'text' : 'unknown', transcript, duration_seconds: duration, frame_count: frames.length, frame_analyses: frames, derived_evidence: evidenceText(transcriptSegments, frames), observations: [`ffprobe reported ${duration.toFixed(2)} seconds.`, `Extracted ${frames.length} bounded review frame(s) locally.`], warnings: [...warnings, ...(hasAudio ? [] : ['No audio stream was present; transcription was not attempted.']), ...(frames.length === 0 ? ['No useful visual text was detected in selected frames.'] : []), ...(transcriptionFailure === null && needsReview ? ['Machine-generated frame OCR and transcript require operator review before approval.'] : [])], failure: transcriptionFailure === null ? null : `Local audio transcription failed: ${transcriptionFailure}` }
       } finally {
         await runtime.rm(workspace, { recursive: true, force: true })
       }

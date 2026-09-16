@@ -5,7 +5,7 @@ import { createLocalVideoProvider, requiredAbsoluteVideoToolPaths, type LocalVid
 const tools = { ffprobePath: '/tools/ffprobe', ffmpegPath: '/tools/ffmpeg', whisperCppPath: '/tools/whisper', whisperModelPath: '/models/ggml.bin', whisperModelSha256: createHash('sha256').update('model').digest('hex') }
 const video = { kind: 'video' as const, name: 'schedule.mp4', mime_type: 'video/mp4', size_bytes: 16, sha256: 'video-sha', validation: 'accepted' as const, duplicate_of: null, failure: null }
 
-function mockedRuntime(options: { readonly audio?: boolean; readonly failFrames?: boolean; readonly failTranscript?: boolean; readonly failProbe?: boolean } = {}): { readonly runtime: LocalVideoRuntime; readonly commands: { executable: string; args: readonly string[] }[]; readonly removed: string[] } {
+function mockedRuntime(options: { readonly audio?: boolean; readonly emptyTranscript?: boolean; readonly failFrames?: boolean; readonly failTranscript?: boolean; readonly failProbe?: boolean } = {}): { readonly runtime: LocalVideoRuntime; readonly commands: { executable: string; args: readonly string[] }[]; readonly removed: string[] } {
   const files = new Map<string, Buffer | string>([[tools.whisperModelPath, Buffer.from('model')]])
   const commands: { executable: string; args: readonly string[] }[] = []; const removed: string[] = []
   const runtime: LocalVideoRuntime = {
@@ -25,7 +25,7 @@ function mockedRuntime(options: { readonly audio?: boolean; readonly failFrames?
       }
       if (executable === tools.whisperCppPath) {
         if (options.failTranscript) throw new Error('whisper failed')
-        files.set(`${args[args.indexOf('-of') + 1]}.json`, JSON.stringify({ transcription: [{ offsets: { from: 1000, to: 2500 }, text: ' Opening program ' }] }))
+        files.set(`${args[args.indexOf('-of') + 1]}.json`, JSON.stringify({ transcription: options.emptyTranscript ? [] : [{ offsets: { from: 1000, to: 2500 }, text: ' Opening program ' }] }))
         return ''
       }
       if (args.includes('-frames:v')) {
@@ -60,13 +60,19 @@ describe('local video provider configuration gate', () => {
     expect(mock.removed).toEqual(['/tmp/buglasan-source-inbox-test'])
   })
 
-  it('retains useful visual evidence when audio is absent or transcription fails', async () => {
+  it('distinguishes no audio, successful audio no-text, and transcription failure while retaining diagnostic frame evidence', async () => {
     const noAudio = mockedRuntime({ audio: false })
     const noAudioResult = await createLocalVideoProvider({ tools, runtime: noAudio.runtime, recognizer: { recognize: async () => ({ data: { text: 'Visual result' } }) } }).analyzeVideo!(video, new Uint8Array([1]), '2026-01-01T00:00:00.000Z')
-    expect(noAudioResult).toMatchObject({ transcript: null, frame_count: 4, warnings: expect.arrayContaining([expect.stringMatching(/No audio stream/)]) })
+    expect(noAudioResult).toMatchObject({ transcript: null, transcript_state: 'no_text', review_state: 'needs_review', failure: null, frame_count: 4, warnings: expect.arrayContaining([expect.stringMatching(/No audio stream/)]) })
+    const noText = mockedRuntime({ emptyTranscript: true })
+    const noTextResult = await createLocalVideoProvider({ tools, runtime: noText.runtime, recognizer: { recognize: async () => ({ data: { text: 'Visual result' } }) } }).analyzeVideo!(video, new Uint8Array([1]), '2026-01-01T00:00:00.000Z')
+    expect(noTextResult).toMatchObject({ transcript: null, transcript_state: 'no_text', review_state: 'needs_review', failure: null, frame_count: 4 })
+    expect(noTextResult.derived_evidence).toMatch(/FRAME .*Visual result/)
+    expect(noTextResult.derived_evidence).not.toMatch(/SPEECH|lyrics/i)
     const failedTranscript = mockedRuntime({ failTranscript: true })
     const failedTranscriptResult = await createLocalVideoProvider({ tools, runtime: failedTranscript.runtime, recognizer: { recognize: async () => ({ data: { text: 'Visual result' } }) } }).analyzeVideo!(video, new Uint8Array([1]), '2026-01-01T00:00:00.000Z')
-    expect(failedTranscriptResult).toMatchObject({ transcript: null, frame_count: 4, warnings: expect.arrayContaining([expect.stringMatching(/transcription failed/)]) })
+    expect(failedTranscriptResult).toMatchObject({ transcript: null, transcript_state: 'unknown', review_state: 'failed', failure: expect.stringMatching(/whisper failed/), frame_count: 4, warnings: expect.arrayContaining([expect.stringMatching(/transcription failed/)]) })
+    expect(failedTranscriptResult.derived_evidence).toMatch(/FRAME .*Visual result/)
     expect(failedTranscript.removed).toHaveLength(1)
   })
 

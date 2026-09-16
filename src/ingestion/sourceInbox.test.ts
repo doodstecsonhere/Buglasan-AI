@@ -63,6 +63,42 @@ describe('local trusted image source inbox', () => {
     expect(() => approveSourceInboxPreview(preview, vi.fn())).toThrow(/explicit operator confirmation/)
   })
 
+  it('keeps caption, speech, and frame-OCR provenance separate while accepting valid no-speech video outcomes', async () => {
+    const mp4 = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0])
+    const videoOnlyProvider: MediaAnalysisProvider = {
+      ...deterministicLocalImageProvider,
+      async analyzeVideo(video, _bytes, analyzedAt) {
+        return { video_sha256: video.sha256, provider: 'local-fixture', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: 'needs_review', transcript_state: 'no_text', transcript: null, duration_seconds: 3, frame_count: 1, frame_analyses: [], derived_evidence: '[FRAME 00:00:00.000 OCR] Event poster', observations: [], warnings: [], failure: null }
+      },
+    }
+    const noSpeechWithOcr = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'poster.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, videoOnlyProvider)
+    expect(noSpeechWithOcr).toMatchObject({ status: 'ready_for_approval', usable_content: true, video_analyses: [{ transcript: null, transcript_state: 'no_text', failure: null }] })
+    const noAudioWithOcr = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'silent.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, videoOnlyProvider)
+    expect(noAudioWithOcr).toMatchObject({ status: 'ready_for_approval', usable_content: true })
+    const captionAndMusicOnly = await analyzeSourceInbox({ ...input([], 'Original operator caption'), videos: [{ name: 'music-only.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, videoOnlyProvider)
+    expect(captionAndMusicOnly).toMatchObject({ operator_caption: 'Original operator caption', status: 'ready_for_approval', video_analyses: [{ transcript: null, transcript_state: 'no_text' }] })
+    const approved = approveSourceInboxPreview(captionAndMusicOnly, vi.fn((payload) => payload), { confirmOcrReview: true })
+    expect(approved.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Original operator caption', video_analyses: [{ transcript: null, transcript_state: 'no_text' }] } })
+    expect(approved.raw_text).toBe('[FRAME 00:00:00.000 OCR] Event poster')
+    expect(approved.raw_text).not.toContain('Original operator caption')
+  })
+
+  it('rejects failed video transcription despite useful diagnostic OCR and does not fabricate no-text content', async () => {
+    const mp4 = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0])
+    const failedProvider: MediaAnalysisProvider = {
+      ...deterministicLocalImageProvider,
+      async analyzeVideo(video, _bytes, analyzedAt) {
+        return { video_sha256: video.sha256, provider: 'local-fixture', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: 'failed', transcript_state: 'unknown', transcript: null, duration_seconds: 3, frame_count: 1, frame_analyses: [], derived_evidence: '[FRAME 00:00:00.000 OCR] Diagnostic poster text', observations: [], warnings: ['Local audio transcription failed; retained visual analysis for diagnostics only.'], failure: 'Local audio transcription failed: whisper exited with code 1' }
+      },
+    }
+    const failed = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'broken-audio.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, failedProvider)
+    expect(failed).toMatchObject({ status: 'failed', usable_content: false, video_analyses: [{ review_state: 'failed', transcript_state: 'unknown', transcript: null, failure: expect.stringMatching(/transcription failed/) }] })
+    expect(() => approveSourceInboxPreview(failed, vi.fn())).toThrow(/Only usable/)
+    const emptyProvider: MediaAnalysisProvider = { ...failedProvider, async analyzeVideo(video, _bytes, analyzedAt) { return { video_sha256: video.sha256, provider: 'local-fixture', provider_version: '1', method: 'ffprobe+ffmpeg+tesseract+whisper.cpp', analyzed_at: analyzedAt, review_state: 'not_required', transcript_state: 'no_text', transcript: null, duration_seconds: 3, frame_count: 0, frame_analyses: [], derived_evidence: '', observations: [], warnings: [], failure: null } } }
+    const empty = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'empty.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, emptyProvider)
+    expect(empty).toMatchObject({ status: 'failed', usable_content: false, video_analyses: [{ transcript: null, transcript_state: 'no_text', derived_evidence: '' }] })
+  })
+
   it('rejects malformed videos and does not treat an unavailable video provider as usable content', async () => {
     const malformed = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'bad.mp4', mimeType: 'video/mp4', bytes: new Uint8Array([1, 2]) }] })
     expect(malformed).toMatchObject({ status: 'failed', video_evidence: [{ validation: 'rejected', failure: expect.stringMatching(/signature/) }] })
