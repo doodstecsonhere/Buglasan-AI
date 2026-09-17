@@ -197,12 +197,16 @@ const CONTEXT_LIMITS = {
   maxSources: 8,
   maxEvents: 10,
   maxChunks: 15,
-  chunkMatchThreshold: 0.7,
+  // Production Gate 2A showed that a verified, current FY2026 reel ranked at
+  // 0.68475 for a reel-identity query. Keep a conservative floor while
+  // admitting this near-threshold, source-specific evidence; all durable
+  // year/current/status filters still apply in the search RPC.
+  chunkMatchThreshold: 0.68,
   chunkMatchCount: 20, // fetch a few more than we display so we can dedupe
   eventMatchCount: 25,
   // If the top similarity falls below this, the query is likely off-topic
   // and we should not pad the prompt with low-quality chunks.
-  minUsefulSimilarity: 0.7,
+  minUsefulSimilarity: 0.68,
 }
 
 // ============================================
@@ -456,6 +460,7 @@ interface DiagnosticReport {
     retrievedSourceIds: string[]
     retrievedChunkSourceIds: string[]
     trustedSourceIds: string[]
+    citationEligibility: Array<{ sourceId: string; postId: string; postUrl: string; eligible: boolean }>
     sourceCount: number
     chunkCount: number
   }
@@ -1007,6 +1012,12 @@ serve(async (req) => {
         retrievedSourceIds: evidence.sources.map((source) => source.id),
         retrievedChunkSourceIds: [...new Set(evidence.chunks.map((chunk) => chunk.source_id))],
         trustedSourceIds: evidence.sources.filter(isValidCitationSource).map((source) => source.id),
+        citationEligibility: evidence.sources.map((source) => ({
+          sourceId: source.id,
+          postId: source.post_id,
+          postUrl: source.post_url,
+          eligible: isValidCitationSource(source),
+        })),
         sourceCount: evidence.sources.length,
         chunkCount: evidence.chunks.length,
       }

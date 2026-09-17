@@ -42,10 +42,10 @@ const CONTEXT_LIMITS = {
   maxSources: 8,
   maxEvents: 10,
   maxChunks: 15,
-  chunkMatchThreshold: 0.7,
+  chunkMatchThreshold: 0.68,
   chunkMatchCount: 20,
   eventMatchCount: 25,
-  minUsefulSimilarity: 0.7,
+  minUsefulSimilarity: 0.68,
 }
 
 interface ChunkResult {
@@ -615,10 +615,21 @@ Deno.test('retrieval: low-similarity chunks are filtered out', async () => {
     mkChunk({ source_id: 'bad', similarity: 0.5 }),
   ]
   const result = await retrieveEvidence(supabase, 2026, 'query')
-  // The mock returns all, but our filter rejects <0.7
+  // The mock returns all, but our filter rejects entries below the configured floor.
   // Note: the RPC's match_threshold would have already filtered these in prod;
   // this asserts the defense-in-depth filter works.
   assert(result.chunks.every((c) => c.similarity >= CONTEXT_LIMITS.minUsefulSimilarity))
+})
+
+Deno.test('retrieval: admits verified near-threshold current evidence', async () => {
+  resetMocks()
+  const supabase = makeMockSupabase()
+  rpcChunks = [mkChunk({ source_id: 'canonical-reel', similarity: 0.684751112177903 })]
+
+  const result = await retrieveEvidence(supabase, 2026, 'official Facebook reel 1957716848966423')
+
+  assertEquals(result.chunks.map((chunk) => chunk.source_id), ['canonical-reel'])
+  assertEquals(result.sources.map((source) => source.id), ['canonical-reel'])
 })
 
 Deno.test('retrieval: category filter passed to get_festival_events', async () => {

@@ -41,6 +41,8 @@ Deno.test('accepts only exact canonical official Facebook posts and authorized r
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/', '123456789'), true)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/example/123456789/', '123456789'), true)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/reel/123456789/', '123456789'), true)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/reel/123456789/', 'reel-123456789'), true)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/reel/123456789/', 'reel-987654321'), false)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/?redirect=bad', '123456789'), false)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Other/posts/123456789/', '123456789'), false)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/OtherPage/reel/123456789/', '123456789'), false)
@@ -62,7 +64,7 @@ Deno.test('grounding: canonical reels and independent historical Buglasan posts 
   const canonicalReel = {
     ...source,
     id: 'reel-2026',
-    post_id: '987654321',
+    post_id: 'reel-987654321',
     post_url: 'https://www.facebook.com/reel/987654321/',
   }
   const historicalPost = {

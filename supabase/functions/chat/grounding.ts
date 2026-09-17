@@ -26,9 +26,13 @@ export function isExactOfficialFacebookPostUrl(value: unknown, postId: unknown):
   if (typeof value !== 'string' || typeof postId !== 'string' || !postId.trim()) return false
   try {
     const url = new URL(value)
+    const reelId = postId.startsWith('reel-') ? postId.slice('reel-'.length) : postId
     const isCanonicalPost = new RegExp(`^${ragPolicy.citations.postPathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\d+|[^/]+/\\d+)/$`).test(url.pathname) &&
       url.pathname.endsWith(`/${postId}/`)
-    const isCanonicalAuthorizedReel = url.pathname === `${canonicalAuthorizedFacebookReelPathPrefix}${postId}/`
+    // The durable source identity prefixes reel post IDs to avoid colliding
+    // with numeric /Buglasan/posts IDs; Facebook's canonical reel URL carries
+    // only the numeric suffix. Validate both forms without relaxing the route.
+    const isCanonicalAuthorizedReel = url.pathname === `${canonicalAuthorizedFacebookReelPathPrefix}${reelId}/`
     return url.protocol === 'https:' &&
       url.hostname === ragPolicy.citations.host &&
       !url.port && !url.username && !url.password && !url.search && !url.hash &&
