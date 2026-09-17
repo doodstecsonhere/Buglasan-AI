@@ -452,6 +452,20 @@ interface RetrieveEvidenceOptions {
 interface DiagnosticReport {
   generationModel?: string
   generation?: { succeeded: boolean; failure?: GenerationFailure } & Partial<GenerationRetryMetadata>
+  evidence?: {
+    retrievedSourceIds: string[]
+    retrievedChunkSourceIds: string[]
+    trustedSourceIds: string[]
+    sourceCount: number
+    chunkCount: number
+  }
+  citations?: {
+    providerMarkerCount: number
+    mappedSourceIds: string[]
+    structuredCitationCount: number
+    claimCitationCount: number
+    fallbackAttached: boolean
+  }
 }
 
 interface RetrievalDiagnostic {
@@ -983,9 +997,20 @@ serve(async (req) => {
       {
         includeHistorical: isHistoricalRequest,
         resolveSupersessionChains: isCorrectionQuery,
+        // The operator diagnostic reports evidence identities after retrieval;
+        // it deliberately does not expose retrieval tuning or RPC internals.
         diagnostic: undefined,
       }
     )
+    if (diagnostic) {
+      diagnostic.evidence = {
+        retrievedSourceIds: evidence.sources.map((source) => source.id),
+        retrievedChunkSourceIds: [...new Set(evidence.chunks.map((chunk) => chunk.source_id))],
+        trustedSourceIds: evidence.sources.filter(isValidCitationSource).map((source) => source.id),
+        sourceCount: evidence.sources.length,
+        chunkCount: evidence.chunks.length,
+      }
+    }
 
     // Factual festival questions must never reach the generative model when
     // retrieval produced no usable official evidence. General conversation
@@ -1129,12 +1154,6 @@ ${buildInclusiveDateArithmeticGuidance(language)}
       return new Response(JSON.stringify(response), { status: hasEvidence ? 200 : 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    if (diagnostic) {
-      return new Response(JSON.stringify({ diagnostics: diagnostic }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
     const providerText = result.response.text()
     // A successful transport response can still contain no usable content.
     // Treat that as a provider-content failure, not zero evidence: preserve
@@ -1144,6 +1163,30 @@ ${buildInclusiveDateArithmeticGuidance(language)}
       ? providerText.trim()
       : buildRecoverableFailureFallback(evidence, language)
     const { responseText, citations, claims } = ensureTrustedCitations(generatedText, evidence.sources)
+
+    if (diagnostic) {
+      const providerMarkerCount = [...generatedText.matchAll(/_\(src:\s*[a-zA-Z0-9_-]+\)_|\[source\s+\d+\]/gi)].length
+      diagnostic.citations = {
+        providerMarkerCount,
+        mappedSourceIds: citations.map((citation) => citation.id),
+        structuredCitationCount: citations.length,
+        claimCitationCount: claims.length,
+        fallbackAttached: providerMarkerCount === 0 && citations.length > 0,
+      }
+      console.info('chat citation diagnostic', {
+        sourceCount: diagnostic.evidence?.sourceCount,
+        chunkCount: diagnostic.evidence?.chunkCount,
+        trustedSourceCount: diagnostic.evidence?.trustedSourceIds.length,
+        providerMarkerCount,
+        structuredCitationCount: citations.length,
+        claimCitationCount: claims.length,
+        fallbackAttached: diagnostic.citations.fallbackAttached,
+      })
+      return new Response(JSON.stringify({ diagnostics: diagnostic }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     const response: ChatResponse = {
       message: {

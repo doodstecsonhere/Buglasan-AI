@@ -78,6 +78,23 @@ describe('chat diagnostic contract', () => {
     expect(chat).not.toContain('suppliedSecret')
   })
 
+  it('traces retrieved evidence through trusted source validation and structured citation mapping', () => {
+    expect(chat).toContain('retrievedSourceIds: evidence.sources.map((source) => source.id)')
+    expect(chat).toContain('retrievedChunkSourceIds: [...new Set(evidence.chunks.map((chunk) => chunk.source_id))]')
+    expect(chat).toContain('trustedSourceIds: evidence.sources.filter(isValidCitationSource).map((source) => source.id)')
+    expect(chat).toContain('providerMarkerCount')
+    expect(chat).toContain('structuredCitationCount: citations.length')
+    expect(chat).toContain('claimCitationCount: claims.length')
+    expect(chat).toContain("console.info('chat citation diagnostic'")
+    expect(chat).toContain('diagnostic: undefined')
+  })
+
+  it('keeps all diagnostic evidence and citation maps server-side', () => {
+    expect(chat).toContain("return new Response(JSON.stringify({ diagnostics: diagnostic })")
+    expect(chat).toContain("console.info('chat citation diagnostic'")
+    expect(chat).toContain('mappedSourceIds: citations.map((citation) => citation.id)')
+  })
+
   it('keeps the retrieval contract and frontend unchanged', () => {
     expect(chat).toContain("generateQueryEmbedding(query, { apiKey: GEMINI_API_KEY, model: GEMINI_EMBEDDING_MODEL })")
     expect(chat).toContain("supabase.rpc('search_source_chunks'")

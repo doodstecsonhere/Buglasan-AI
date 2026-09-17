@@ -23,6 +23,7 @@ import {
   mapValidatedClaimCitations,
   isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
+  isValidCitationSource,
   type GroundingSourceRecord,
 } from './grounding.ts'
 
@@ -55,6 +56,65 @@ Deno.test('grounding: citation mapping keeps only valid, retrieved, linkable sou
     { claimIndex: 0, sourceId: 'source-1', marker: '[source 1]' },
     { claimIndex: 1, sourceId: 'reel-source', marker: '[Source 2]' },
   ])
+})
+
+Deno.test('grounding: canonical reels and independent historical Buglasan posts retain provenance', () => {
+  const canonicalReel = {
+    ...source,
+    id: 'reel-2026',
+    post_id: '987654321',
+    post_url: 'https://www.facebook.com/reel/987654321/',
+  }
+  const historicalPost = {
+    ...source,
+    id: 'post-2025',
+    post_id: '202512345',
+    post_url: 'https://www.facebook.com/Buglasan/posts/202512345/',
+    festival_year: 2025,
+    is_current: false,
+    status: 'archived',
+  }
+
+  assertEquals(isValidCitationSource(canonicalReel), true)
+  assertEquals(isValidCitationSource(historicalPost), true)
+  assertEquals(
+    mapValidatedClaimCitations('[Source 1] [Source 2]', [canonicalReel, historicalPost]),
+    {
+      sourceIds: ['reel-2026', 'post-2025'],
+      claims: [
+        { claimIndex: 0, sourceId: 'reel-2026', marker: '[Source 1]' },
+        { claimIndex: 1, sourceId: 'post-2025', marker: '[Source 2]' },
+      ],
+    },
+  )
+})
+
+Deno.test('grounding: fabricated markers and unsupported evidence never create structured citations', () => {
+  const unsupported = {
+    ...source,
+    id: 'unsupported-video',
+    post_id: '111222333',
+    post_url: 'https://www.facebook.com/OtherPage/videos/111222333/',
+  }
+  const mapped = mapValidatedClaimCitations(
+    'Fabricated claim [Source 3] _(src: not-retrieved)_ [Source 2]',
+    [source, unsupported],
+  )
+  assertEquals(mapped.sourceIds, [])
+  assertEquals(mapped.claims, [])
+})
+
+Deno.test('grounding: UNKNOWN evidence and FY2026 evidence remain isolated', () => {
+  const unknownYear = { ...source, id: 'unknown-year', festival_year: null }
+  const fy2026 = { ...source, id: 'fy2026' }
+  assertEquals(isValidCitationSource(unknownYear), false)
+  assertEquals(
+    mapValidatedClaimCitations('[Source 1] [Source 2]', [unknownYear, fy2026]),
+    {
+      sourceIds: ['fy2026'],
+      claims: [{ claimIndex: 0, sourceId: 'fy2026', marker: '[Source 2]' }],
+    },
+  )
 })
 
 Deno.test('grounding: unrelated canonical events do not defeat strict factual zero-evidence fallback', () => {
