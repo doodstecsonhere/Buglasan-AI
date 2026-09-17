@@ -15,6 +15,9 @@ export const genericRagPrinciples = deepFreeze({
   },
 })
 
+/** The only reel route eligible as an official Facebook citation source. */
+export const canonicalAuthorizedFacebookReelPathPrefix = '/reel/'
+
 const configuredDeployment = {
   identity: {
     assistantName: 'Buglasan AI',

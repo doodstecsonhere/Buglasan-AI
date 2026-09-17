@@ -31,7 +31,7 @@ const phase6BaselineHashes = {
   'src/services/chatService.ts': 'cdaed25f3117e32a7d0d24abf42f2494db686f3de45b953fffc5c853d66e1818',
   'src/services/demoChatResponder.ts': '9654477efed607149f934057b53dac725e429e9dbe1fdc192f34eb065e870618',
   'supabase/functions/chat/index.ts': 'b6cd2d91e416a83be04cb6c4a5079f80edb000949ffcf421076a86f013459d2e',
-  'supabase/functions/chat/grounding.ts': '3ea425c62e79bdfd1ba99d78b734ade29e5c0f64459e9d5e52d194bd23aea0e5',
+  'supabase/functions/chat/grounding.ts': '97608f1787678d1373ba4e5c3bc612e6c3fce36b2c64052e09254ee235d3c210',
   'supabase/functions/_shared/extraction.ts': '1b748871b690de33d0e9079dbd0633311826c56a532dd1bc5482efc646ece7b8',
   'supabase/functions/_shared/reconciliation.ts': 'bee4cfa1297d817eba9959c41f766506abdb58eda404a54cac332e2019e76023',
   'n8n/workflows/buglasan-source-collector.json': '077fef581f26aef625ca37cd92225a352c731cc61293d2819439fc4ba62ede9e',

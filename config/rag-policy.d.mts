@@ -36,6 +36,7 @@ export const genericRagPrinciples: Readonly<{
     officialSourceDoesNotImplyOfficialProduct: true
   }>
 }>
+export const canonicalAuthorizedFacebookReelPathPrefix: '/reel/'
 export function assertValidRagPolicy(input: unknown): asserts input is RagPolicy
 export function defineRagPolicy(input: unknown): RagPolicy
 export function assertProductRagParity(product: import('../src/config/productConfig').ProductConfig, policy: RagPolicy): true

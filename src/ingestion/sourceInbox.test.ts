@@ -127,6 +127,8 @@ describe('local trusted image source inbox', () => {
     expect(() => approveSourceInboxPreview(reel, vi.fn())).toThrow(/Official Buglasan source identity/)
     const dispatch = vi.fn((payload) => payload)
     const approved = approveSourceInboxPreview(reel, dispatch, { confirmOfficialBuglasanSource: true })
+    expect(approved.post_url).toBe('https://www.facebook.com/reel/123456789/')
+    expect(approved.post_url).not.toContain('/Buglasan/posts/')
     expect(approved.source_metadata).toMatchObject({ source_inbox: { official_buglasan_source_verified: true } })
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/' })).rejects.toThrow(/canonical/)
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reels/123' })).rejects.toThrow(/canonical/)

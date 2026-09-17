@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { configuredProduct } from '../../config/product-config.mjs'
 import {
   assertProductRagParity,
+  canonicalAuthorizedFacebookReelPathPrefix,
   defineRagPolicy,
   genericRagPrinciples,
   ragPolicy,
@@ -74,6 +75,7 @@ describe('Phase 3 RAG policy', () => {
   it('P3-T11 preserves exact-year isolation', () => expect(genericRagPrinciples.evidence.exactYearIsolation).toBe(true))
   it('P3-T12 preserves supersession awareness', () => expect(genericRagPrinciples.evidence.supersessionAware).toBe(true))
   it('P3-T13 preserves required citations', () => expect(genericRagPrinciples.evidence.citationsRequired).toBe(true))
+  it('P3-T13a restricts eligible reel citations to the canonical Facebook route', () => expect(canonicalAuthorizedFacebookReelPathPrefix).toBe('/reel/'))
 
   it('P3-T14 deeply freezes deployment values and generic principles', () => {
     expect(Object.isFrozen(ragPolicy)).toBe(true)

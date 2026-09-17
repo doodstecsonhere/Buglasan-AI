@@ -36,18 +36,25 @@ const source: GroundingSourceRecord = {
   published_at: '2026-07-31T11:34:59+08:00', festival_year: 2026, is_current: true, status: 'active',
 }
 
-Deno.test('accepts only exact canonical official Facebook post URLs', () => {
+Deno.test('accepts only exact canonical official Facebook posts and authorized reel URLs', () => {
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/', '123456789'), true)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/example/123456789/', '123456789'), true)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/reel/123456789/', '123456789'), true)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Buglasan/posts/123456789/?redirect=bad', '123456789'), false)
   assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/Other/posts/123456789/', '123456789'), false)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/OtherPage/reel/123456789/', '123456789'), false)
+  assertEquals(isExactOfficialFacebookPostUrl('https://www.facebook.com/reel/123456789/?redirect=bad', '123456789'), false)
 })
 
 Deno.test('grounding: citation mapping keeps only valid, retrieved, linkable sources', () => {
-  const malformed = { ...source, id: 'bad-source', post_url: 'not-a-url' }
-  const mapped = mapValidatedClaimCitations('[source 1] [Source 2] _(src: unknown)_', [source, malformed])
-  assertEquals(mapped.sourceIds, ['source-1'])
-  assertEquals(mapped.claims, [{ claimIndex: 0, sourceId: 'source-1', marker: '[source 1]' }])
+  const supportedReel = { ...source, id: 'reel-source', post_id: '987654321', post_url: 'https://www.facebook.com/reel/987654321/' }
+  const unsupported = { ...source, id: 'bad-source', post_url: 'https://www.facebook.com/OtherPage/videos/987654321/' }
+  const mapped = mapValidatedClaimCitations('[source 1] [Source 2] [Source 3] _(src: unknown)_', [source, supportedReel, unsupported])
+  assertEquals(mapped.sourceIds, ['source-1', 'reel-source'])
+  assertEquals(mapped.claims, [
+    { claimIndex: 0, sourceId: 'source-1', marker: '[source 1]' },
+    { claimIndex: 1, sourceId: 'reel-source', marker: '[Source 2]' },
+  ])
 })
 
 Deno.test('grounding: unrelated canonical events do not defeat strict factual zero-evidence fallback', () => {

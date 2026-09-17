@@ -1,4 +1,4 @@
-import { ragPolicy } from '../../../config/rag-policy.mjs'
+import { canonicalAuthorizedFacebookReelPathPrefix, ragPolicy } from '../../../config/rag-policy.mjs'
 
 export type SupportedLanguage = 'en' | 'ceb' | 'fil'
 
@@ -26,11 +26,13 @@ export function isExactOfficialFacebookPostUrl(value: unknown, postId: unknown):
   if (typeof value !== 'string' || typeof postId !== 'string' || !postId.trim()) return false
   try {
     const url = new URL(value)
+    const isCanonicalPost = new RegExp(`^${ragPolicy.citations.postPathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\d+|[^/]+/\\d+)/$`).test(url.pathname) &&
+      url.pathname.endsWith(`/${postId}/`)
+    const isCanonicalAuthorizedReel = url.pathname === `${canonicalAuthorizedFacebookReelPathPrefix}${postId}/`
     return url.protocol === 'https:' &&
       url.hostname === ragPolicy.citations.host &&
       !url.port && !url.username && !url.password && !url.search && !url.hash &&
-      new RegExp(`^${ragPolicy.citations.postPathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\d+|[^/]+/\\d+)/$`).test(url.pathname) &&
-      url.pathname.endsWith(`/${postId}/`)
+      (isCanonicalPost || isCanonicalAuthorizedReel)
   } catch {
     return false
   }
