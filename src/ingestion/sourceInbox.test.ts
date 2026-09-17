@@ -124,6 +124,7 @@ describe('local trusted image source inbox', () => {
   it('previews canonical reels structurally but requires an explicit official-source attestation before approval', async () => {
     const reel = await analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://m.facebook.com/reel/123456789?fbclid=tracking' })
     expect(reel.reference.post_url).toBe('https://www.facebook.com/reel/123456789/')
+    expect(reel.reference.identity).toBe('reel-123456789')
     expect(() => approveSourceInboxPreview(reel, vi.fn())).toThrow(/Official Buglasan source identity/)
     const dispatch = vi.fn((payload) => payload)
     const approved = approveSourceInboxPreview(reel, dispatch, { confirmOfficialBuglasanSource: true })
@@ -141,6 +142,28 @@ describe('local trusted image source inbox', () => {
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com.evil.example/reel/123/' })).rejects.toThrow(/canonical/)
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123https://evil.example/' })).rejects.toThrow(/numeric/)
     await expect(analyzeSourceInbox({ ...input(), facebookPostUrl: 'https://www.facebook.com/reel/123?next=https%3A%2F%2Fevil.example' })).rejects.toThrow(/embedded URLs/)
+  })
+
+  it('uses canonical Facebook references as source identities without collapsing distinct evidence', async () => {
+    const shared = { ...input(), operatorCaption: 'Same supplied evidence' }
+    const reel = await analyzeSourceInbox({ ...shared, facebookPostUrl: 'https://www.facebook.com/reel/1957716848966423/' })
+    const sameReel = await analyzeSourceInbox({ ...shared, facebookPostUrl: 'https://www.facebook.com/reel/1957716848966423/' })
+    const post = await analyzeSourceInbox({ ...shared, facebookPostUrl: 'https://www.facebook.com/Buglasan/posts/1475245514640502/' })
+    const samePost = await analyzeSourceInbox({ ...shared, facebookPostUrl: 'https://www.facebook.com/Buglasan/posts/1475245514640502/' })
+
+    const approvedReel = approveSourceInboxPreview(reel, (payload) => payload, { confirmOfficialBuglasanSource: true })
+    const approvedSameReel = approveSourceInboxPreview(sameReel, (payload) => payload, { confirmOfficialBuglasanSource: true })
+    const approvedPost = approveSourceInboxPreview(post, (payload) => payload)
+    const approvedSamePost = approveSourceInboxPreview(samePost, (payload) => payload)
+
+    expect(approvedReel).toMatchObject({ post_id: 'reel-1957716848966423', post_url: 'https://www.facebook.com/reel/1957716848966423/', source_metadata: { source_inbox: { replay_key: reel.replay_key }, source_adapter: { provenance: 'operator_provided' } } })
+    expect(approvedSameReel.post_id).toBe(approvedReel.post_id)
+    expect(approvedSameReel.post_url).toBe(approvedReel.post_url)
+    expect(approvedPost).toMatchObject({ post_id: '1475245514640502', post_url: 'https://www.facebook.com/Buglasan/posts/1475245514640502/', source_metadata: { source_inbox: { replay_key: post.replay_key }, source_adapter: { provenance: 'operator_provided' } } })
+    expect(approvedSamePost.post_id).toBe(approvedPost.post_id)
+    expect(approvedSamePost.post_url).toBe(approvedPost.post_url)
+    expect(approvedReel.post_id).not.toBe(approvedPost.post_id)
+    expect(approvedReel.post_url).not.toBe(approvedPost.post_url)
   })
 
   it('has stable replay identity and does not expose a generic configuration or secret path', async () => {

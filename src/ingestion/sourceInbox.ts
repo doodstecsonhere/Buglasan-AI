@@ -174,6 +174,20 @@ function isCanonicalFacebookReelUrl(value: string): boolean {
   return /^https:\/\/www\.facebook\.com\/reel\/\d+\/$/.test(value)
 }
 
+/**
+ * The collector resolves Facebook sources by (platform, post_id).  Use the
+ * canonical reference's own identity at the Source Inbox boundary rather than
+ * passing its replay hash through as a post id.  Numeric Buglasan post ids
+ * retain their established collector identity; reels are namespaced so a reel
+ * cannot collide with a post that happens to have the same numeric id.
+ */
+function canonicalFacebookSourceIdentity(postUrl: string, fallbackHash: string): string {
+  const reelId = /^https:\/\/www\.facebook\.com\/reel\/(\d+)\/$/.exec(postUrl)?.[1]
+  if (reelId !== undefined) return `reel-${reelId}`
+  const postId = /^https:\/\/www\.facebook\.com\/Buglasan\/posts\/(\d+)\/?$/i.exec(postUrl)?.[1]
+  return postId ?? `source-inbox-${fallbackHash.slice(0, 24)}`
+}
+
 function hasSignature(mimeType: string, bytes: Uint8Array): boolean {
   if (mimeType === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
   if (mimeType === 'image/png') return bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)
@@ -313,7 +327,7 @@ export async function analyzeSourceInbox(input: SourceInboxInput, provider: Medi
   const requiresOcrReview = analyses.some((analysis) => analysis.review_state === 'needs_review') || videoAnalyses.some((analysis) => analysis.review_state === 'needs_review')
   const mediaKinds = Number(acceptedImages.length > 0) + Number(acceptedVideos.length > 0)
   const sourceType: SourceType = caption !== null && mediaKinds > 0 || mediaKinds > 1 ? 'mixed' : acceptedVideos.length ? 'video' : acceptedImages.length ? 'image' : caption !== null ? 'text' : 'link'
-  return { replay_key: replayKey, reference: { platform: 'facebook', post_url: postUrl, identity: `source-inbox-${identityHash.slice(0, 24)}` }, operator_caption: caption, festival_year: input.festivalYear ?? null, image_evidence: evidence, video_evidence: videoEvidence, analyses, video_analyses: videoAnalyses, requires_ocr_review: requiresOcrReview, status, usable_content: usableContent, source_type: sourceType, failure: status === 'reference_only' ? 'reference-only submissions cannot be approved' : status === 'failed' ? 'no valid image, analyzed video, or caption content is available' : null }
+  return { replay_key: replayKey, reference: { platform: 'facebook', post_url: postUrl, identity: canonicalFacebookSourceIdentity(postUrl, identityHash) }, operator_caption: caption, festival_year: input.festivalYear ?? null, image_evidence: evidence, video_evidence: videoEvidence, analyses, video_analyses: videoAnalyses, requires_ocr_review: requiresOcrReview, status, usable_content: usableContent, source_type: sourceType, failure: status === 'reference_only' ? 'reference-only submissions cannot be approved' : status === 'failed' ? 'no valid image, analyzed video, or caption content is available' : null }
 }
 
 function failedAnalysis(image: ImageEvidence, provider: MediaAnalysisProvider, analyzedAt: string, failure: string): ImageAnalysisResult {
