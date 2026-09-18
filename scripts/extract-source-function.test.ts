@@ -47,6 +47,7 @@ describe('extract-source trust and resilience boundaries', () => {
   })
   it('uses a currently supported model default and logs only sanitized upstream metadata', () => {
     expect(code).toContain("'gemini-flash-latest'")
+    expect(code).toContain("?? 'phase6-v2'")
     expect(code).toContain('safeGeminiErrorMetadata')
     expect(code).toContain("request_id: result.headers.get('x-goog-request-id')")
     expect(code).not.toMatch(/console\.(?:log|error)\([^\n]*(?:GEMINI_API_KEY|SERVICE_KEY|TRUSTED_TOKEN)/)
@@ -59,6 +60,20 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(code).toContain("postId.startsWith('reconciliation-test-')")
     expect(code).toContain('fixture.source !== sourceText')
     expect(code).not.toMatch(/body\.(?:result|payload|extraction|candidates)/)
+  })
+
+  it('selects the exact pipeline 2027 canonical fixture before any provider call when the pipeline token is supplied', () => {
+    const fixtureStart = code.indexOf("'pipeline-test-10-canonical':")
+    const fixtureEnd = code.indexOf("'pipeline-test-batch-a':", fixtureStart)
+    const fixture = code.slice(fixtureStart, fixtureEnd)
+    const selection = code.slice(code.indexOf('function acceptanceFixture'), code.indexOf('async function callGemini'))
+
+    expect(fixture).toContain("festival_year: 2027")
+    expect(fixture).toContain("event_name: 'Buglasan Pipeline Canonical 2027'")
+    expect(selection).toContain("request.headers.get('x-pipeline-acceptance-fixture-token')")
+    expect(selection).toContain("postId.startsWith('pipeline-test-')")
+    expect(selection).toContain('if (fixture?.source === sourceText) return fixture.result')
+    expect(code.indexOf('acceptanceFixture(source.post_id, sourceText, request) ?? await callGemini')).toBeGreaterThan(code.indexOf('function acceptanceFixture'))
   })
 
   it('has an operator-only Phase 10 path bound to the exact approved claim contract', () => {
@@ -107,6 +122,10 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(safe).toEqual({ provider: 'gemini', category: 'validation_failed', httpStatus: undefined, diagnostic: 'invalid_content' })
     expect(JSON.stringify(safe)).not.toContain('raw secret response')
     expect(safeProviderError(new Error('raw unclassified provider body'))).toEqual({ category: 'unknown_provider_error' })
+  })
+
+  it('keeps an exhausted transient provider failure retryable', () => {
+    expect(code).toContain('error instanceof TransientExtractionError || isFailoverEligible(error)')
   })
 
   it.each([[429, 'rate_limited'], [500, 'upstream_500'], [502, 'upstream_502'], [503, 'upstream_503'], [504, 'upstream_504']] as const)('keeps HTTP classification %s unchanged', (status, category) => expect(classifyHttpStatus(status)).toBe(category))

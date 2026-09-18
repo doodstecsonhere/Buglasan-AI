@@ -186,7 +186,7 @@ export function isTemporalOnlyQuery(query: string): boolean {
   return /^(what(?:'s| is)?\s+(?:happening\s+)?|anything\s+)?(?:today|tomorrow|tmrw)$/.test(normalized)
 }
 
-/** A date window is answerable only from canonical event records, not generic source text. */
+/** A date window needs either canonical event records or query-relevant source evidence. */
 export function isEventWindowQuery(query: string): boolean {
   return /\b(today|tomorrow|tmrw|this\s+week(?:end)?|next\s+week(?:end)?|upcoming|coming\s+(?:up|soon)|happening|events?|activities|schedule|date|when)\b/i.test(query) &&
     !isAnnouncementQuery(query)
@@ -231,8 +231,20 @@ export function hasUsableEvidence(evidence: EvidencePresence): boolean {
   return evidence.sources.length > 0 || evidence.chunks.length > 0
 }
 
+export function hasQueryRelevantEvidence(query: string, evidence: EvidencePresence): boolean {
+  if (!hasUsableEvidence(evidence)) return false
+  const terms = getLexicalEvidenceTerms(query)
+  if (!terms.length) return true
+  const text = [...evidence.sources, ...evidence.chunks].map((item) => {
+    if (!item || typeof item !== 'object') return ''
+    const record = item as Record<string, unknown>
+    return [record.content, record.normalized_text, record.raw_text].filter((value): value is string => typeof value === 'string').join(' ')
+  }).join(' ').toLocaleLowerCase()
+  return terms.some((term) => text.includes(term))
+}
+
 export function shouldUseZeroEvidenceFallback(query: string, evidence: EvidencePresence): boolean {
-  return isFestivalInformationQuery(query) && !hasUsableEvidence(evidence)
+  return isFestivalInformationQuery(query) && !hasQueryRelevantEvidence(query, evidence)
 }
 
 /**
@@ -298,6 +310,7 @@ const LEXICAL_STOP_WORDS = new Set([
   'about', 'after', 'before', 'buglasan', 'current', 'event', 'festival',
   'from', 'information', 'schedule', 'their', 'there', 'these', 'this',
   'where', 'which', 'with', 'when', 'what', 'will', 'year',
+  'ang', 'ano', 'asa', 'kailan', 'kanus-a', 'mga', 'ng', 'petsa', 'unsa',
 ])
 
 /** Extract proper-noun candidates for exact-year lexical retrieval fallback. */

@@ -20,6 +20,8 @@
     "test:ui": "vitest --ui",
     "source-inbox": "vite-node scripts/source-inbox.ts",
     "source-inbox:web": "vite-node scripts/source-inbox-web.ts",
+    "gate2b:production-intake": "vite-node scripts/gate2b-production-intake.ts",
+    "gate2b:extraction-recovery": "node --env-file=.env.local --experimental-strip-types scripts/gate2b-extraction-version-recovery.ts",
     "smoke:rag:live": "node --experimental-strip-types scripts/seed-smoke-test.ts --acceptance",
     "smoke:rag:cleanup": "node --experimental-strip-types scripts/seed-smoke-test.ts --cleanup",
     "source:acceptance": "node --experimental-strip-types scripts/source-collector-live.ts --acceptance",

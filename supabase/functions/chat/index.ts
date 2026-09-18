@@ -1044,7 +1044,7 @@ serve(async (req) => {
       return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    if (!diagnostic && isEventWindowQuery(message) && evidence.events.length === 0) {
+    if (!diagnostic && isEventWindowQuery(message) && !hasUsableEvidence(evidence)) {
       const response: ChatResponse = {
         message: { id: crypto.randomUUID(), role: 'assistant', content: buildNoVerifiedEventListingFallback(resolvedYear, language), timestamp: new Date().toISOString(), sources: [], festivalYear: resolvedYear },
         retrievedSources: [], retrievedEvents: [], retrievedChunks: [], yearResolved: resolvedYear, language,

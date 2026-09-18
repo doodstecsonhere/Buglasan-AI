@@ -59,6 +59,14 @@ describe('provider failover foundation', () => {
   it('falls back only after transient exhaustion and bounds attempts', async () => { let secondaryCalls = 0; const secondary = adapter('openai_compatible'); const wrapped = { ...secondary, generate: async () => { secondaryCalls++; if (secondaryCalls === 1) throw new ProviderError('openai_compatible', 'upstream_503', 'x'); return { text: 'ok', provider: 'openai_compatible' as const, model: 'test' } } }; const result = await generateWithFailover({ prompt: 'x' }, adapter('gemini', [new ProviderError('gemini', 'upstream_503', 'x'), new ProviderError('gemini', 'upstream_503', 'x'), new ProviderError('gemini', 'upstream_503', 'x')]), wrapped, (text) => text); expect(result.value).toBe('ok'); expect(secondaryCalls).toBe(2) })
   it('does not fallback for deterministic failures', async () => { await expect(generateWithFailover({ prompt: 'x' }, adapter('gemini', [new ProviderError('gemini', 'invalid_request', 'x')]), adapter('openai_compatible'), (text) => text)).rejects.toThrow('x') })
 
+  it('falls back when the primary provider fails strict extraction validation', async () => {
+    const secondary = { ...adapter('openai_compatible'), generate: async () => ({ text: JSON.stringify({ candidates: [], source_summary: null }), provider: 'openai_compatible' as const, model: 'test' }) }
+    const invalid = new ProviderError('gemini', 'validation_failed', 'invalid structured output', undefined, 'invalid_content')
+    const result = await generateWithFailover({ prompt: 'x', structured: true }, adapter('gemini', [invalid]), secondary, (text) => JSON.parse(text), { maxPrimary: 1 })
+    expect(result.value).toEqual({ candidates: [], source_summary: null })
+    expect(result.metadata.provider).toBe('openai_compatible')
+  })
+
   it.each([429, 500, 502, 503, 504])('fails over for transient HTTP %s', async (status) => {
     const secondary = adapter('openai_compatible')
     const result = await generateWithFailover({ prompt: 'x' }, adapter('gemini', [new ProviderError('gemini', classifyHttpStatus(status), 'safe')]), secondary, (text) => text, { maxPrimary: 1 })

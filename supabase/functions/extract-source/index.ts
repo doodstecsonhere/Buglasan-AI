@@ -14,7 +14,7 @@ const ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('EXTRACTION_ACCEPTANCE_FIXTURE_TOK
 const PIPELINE_ACCEPTANCE_FIXTURE_TOKEN = Deno.env.get('PIPELINE_ACCEPTANCE_FIXTURE_TOKEN') ?? ''
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? ''
 const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') ?? 'gemini-flash-latest'
-const EXTRACTOR_VERSION = Deno.env.get('EXTRACTOR_VERSION') ?? 'phase6-v1'
+const EXTRACTOR_VERSION = Deno.env.get('EXTRACTOR_VERSION') ?? 'phase6-v2'
 const RECONCILE_AFTER_EXTRACTION = Deno.env.get('RECONCILE_AFTER_EXTRACTION') === 'true'
 const RECONCILE_EVENT_TOKEN = Deno.env.get('RECONCILE_EVENT_TOKEN') ?? ''
 const LEASE_SECONDS = 120
@@ -219,7 +219,7 @@ serve(async (request) => {
     }
     return response(200, { status, source_id: body.source_id, persisted_candidates: persisted.persisted_candidates ?? 0, review_reasons: validated.reasons })
   } catch (error) {
-    const transient = controller.signal.aborted || error instanceof TransientExtractionError
+    const transient = controller.signal.aborted || error instanceof TransientExtractionError || isFailoverEligible(error)
     const status = transient ? 'retryable_error' : 'permanent_error'
     const diagnostic = persistedExtractionError(error, controller.signal.aborted)
     await rest('rpc/fail_source_extraction', { method: 'POST', body: JSON.stringify({ p_extraction_id: claim.id, p_claim_token: claimToken, p_status: status, p_error_code: diagnostic.code, p_error_message: diagnostic.message }) })

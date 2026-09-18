@@ -20,6 +20,8 @@ import {
   isTemporalOnlyQuery,
   isEventWindowQuery,
   isAnnouncementQuery,
+  hasUsableEvidence,
+  hasQueryRelevantEvidence,
   mapValidatedClaimCitations,
   isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
@@ -123,6 +125,12 @@ Deno.test('grounding: unrelated canonical events do not defeat strict factual ze
   assertEquals(shouldUseZeroEvidenceFallback('Where is the 2026 fireworks launch?', {
     sources: [], chunks: [], events: [{ event_name: 'Unrelated accepted event' }],
   }), true)
+  assertEquals(shouldUseZeroEvidenceFallback('Where is the 2026 fireworks launch?', {
+    sources: [], chunks: [{ content: 'Buglasan Festival dates are October 15–25, 2026.' }], events: [],
+  }), true)
+  assertEquals(hasQueryRelevantEvidence('What are the festival dates in 2026?', {
+    sources: [], chunks: [{ content: 'Buglasan Festival dates are October 15–25, 2026.' }], events: [],
+  }), true)
 })
 
 Deno.test('grounding: Filipino date arithmetic explicitly uses inclusive wording', () => {
@@ -179,6 +187,7 @@ Deno.test('grounding: temporal event windows require event evidence rather than 
   assertEquals(buildNoVerifiedEventListingFallback(2026, 'en').includes('No verified Buglasan Festival 2026 event listing'), true)
   assertEquals(buildTemporaryServiceError('en').includes('temporarily unavailable'), true)
   assertEquals(isEventWindowQuery('When is Buglasan Festival 2026?'), true)
+  assertEquals(hasUsableEvidence({ sources: [], chunks: [source], events: [] }), true)
   assertEquals(buildGroundedGenerationFallback('en').includes('relevant official Buglasan information'), true)
 })
 

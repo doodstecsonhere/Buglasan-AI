@@ -17,7 +17,7 @@ export class ProviderError extends Error {
 
 export function isFailoverEligible(error: unknown): boolean {
   if (!(error instanceof ProviderError)) return false
-  return ['rate_limited', 'upstream_500', 'upstream_502', 'upstream_503', 'upstream_504', 'timeout', 'dns_failure', 'connection_reset', 'connection_failure', 'fetch_failed'].includes(error.category)
+  return ['rate_limited', 'upstream_500', 'upstream_502', 'upstream_503', 'upstream_504', 'timeout', 'dns_failure', 'connection_reset', 'connection_failure', 'fetch_failed', 'validation_failed'].includes(error.category)
 }
 
 export function safeProviderError(error: unknown): Record<string, unknown> {
