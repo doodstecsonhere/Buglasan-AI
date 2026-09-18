@@ -1,4 +1,5 @@
 import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
@@ -66,6 +67,7 @@ describe('Phase 2 deployment branding and static generation', () => {
     expect(validateDeploymentBranding(deploymentBranding)).toBe(deploymentBranding)
     expect(deploymentBranding.product).toMatchObject({ eventName: 'Buglasan Festival', officialUrl: 'https://www.facebook.com/Buglasan', avatarPath: '/icons/icon-192.png' })
     expect(deploymentBranding.assets).toMatchObject({ favicon: { publicPath: '/favicon.svg' }, appleTouchIcon: { width: 180, height: 180 } })
+    expect(readFileSync(resolve(root, 'public/favicon.svg'), 'utf8')).toContain('/brand/buglasan-ai-canonical.png')
     expect(deploymentBranding.assets.icons.map(icon => icon.purpose)).toEqual(['any', 'any', 'maskable'])
     expect(cacheOwnershipPrefix(deploymentBranding)).toBe('buglasan-ai.production.shell-')
     expect(cacheName(deploymentBranding)).toBe('buglasan-ai.production.shell-v5-offline-knowledge')
