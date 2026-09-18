@@ -18,6 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
+    "buglasan:update": "vite-node scripts/buglasan-update.ts",
+    "buglasan:status": "vite-node scripts/buglasan-status.ts",
     "source-inbox": "vite-node scripts/source-inbox.ts",
     "source-inbox:web": "vite-node scripts/source-inbox-web.ts",
     "gate2b:production-intake": "vite-node scripts/gate2b-production-intake.ts",
