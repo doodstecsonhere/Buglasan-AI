@@ -97,6 +97,27 @@ describe('Buglasan Live Operations — Source Updating Workflow', () => {
     }
   })
 
+  it('classifies MP4 without usable caption as needs review before intake', async () => {
+    const { dir, cleanup } = await createFixtureDir()
+    try {
+      const bundle = join(dir, '11')
+      await mkdir(bundle)
+      await writeFile(join(bundle, 'manifest.txt'), 'URL:\nhttps://www.facebook.com/Buglasan/posts/110011\n\nCAPTION:\n')
+      await writeFile(join(bundle, 'clip.mp4'), Buffer.from([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0]))
+
+      const comparison = compareCorpus(await scanSourceBundles({ sourceRoot: dir }), [])
+      expect(comparison.newSources).toHaveLength(0)
+      expect(comparison.needsReview).toHaveLength(1)
+      expect(comparison.needsReview[0].classificationReason).toMatch(/usable textual evidence|media-analysis mechanism/i)
+      const dispatcher = vi.fn()
+      const result = await executeIntake(comparison, { confirmProduction: true, dispatcher })
+      expect(result.admitted).toHaveLength(0)
+      expect(dispatcher).not.toHaveBeenCalled()
+    } finally {
+      await cleanup()
+    }
+  })
+
   // 3. multiple new valid sources
   it('3. sequentially intakes multiple new valid sources', async () => {
     const { dir, cleanup } = await createFixtureDir()

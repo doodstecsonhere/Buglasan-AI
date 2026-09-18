@@ -76,11 +76,22 @@ describe('local trusted image source inbox', () => {
     const noAudioWithOcr = await analyzeSourceInbox({ ...input([], null), videos: [{ name: 'silent.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, videoOnlyProvider)
     expect(noAudioWithOcr).toMatchObject({ status: 'ready_for_approval', usable_content: true })
     const captionAndMusicOnly = await analyzeSourceInbox({ ...input([], 'Original operator caption'), videos: [{ name: 'music-only.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, videoOnlyProvider)
-    expect(captionAndMusicOnly).toMatchObject({ operator_caption: 'Original operator caption', status: 'ready_for_approval', video_analyses: [{ transcript: null, transcript_state: 'no_text' }] })
+    expect(captionAndMusicOnly).toMatchObject({ operator_caption: 'Original operator caption', status: 'ready_for_approval', video_analyses: [] })
     const approved = approveSourceInboxPreview(captionAndMusicOnly, vi.fn((payload) => payload), { confirmOcrReview: true })
-    expect(approved.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Original operator caption', video_analyses: [{ transcript: null, transcript_state: 'no_text' }] } })
-    expect(approved.raw_text).toBe('[FRAME 00:00:00.000 OCR] Event poster')
-    expect(approved.raw_text).not.toContain('Original operator caption')
+    expect(approved.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Original operator caption', video_evidence: [{ name: 'music-only.mp4', validation: 'accepted' }], video_analyses: [] } })
+    expect(approved.raw_text).toBe('Original operator caption')
+  })
+
+  it('uses an operator caption for MP4 evidence without invoking video analysis', async () => {
+    const mp4 = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0])
+    const analyzeVideo = vi.fn()
+    const preview = await analyzeSourceInbox({ ...input([], 'Exact captured caption\nwith line breaks'), videos: [{ name: 'bundle-11.mp4', mimeType: 'video/mp4', bytes: mp4 }] }, { ...deterministicLocalImageProvider, analyzeVideo })
+    const approved = approveSourceInboxPreview(preview, (payload) => payload)
+
+    expect(preview).toMatchObject({ status: 'ready_for_approval', source_type: 'text', operator_caption: 'Exact captured caption\nwith line breaks', video_evidence: [{ validation: 'accepted' }], video_analyses: [] })
+    expect(analyzeVideo).not.toHaveBeenCalled()
+    expect(approved.raw_text).toBe('Exact captured caption\nwith line breaks')
+    expect(approved.source_metadata).toMatchObject({ source_inbox: { video_analyses: [] } })
   })
 
   it('rejects failed video transcription despite useful diagnostic OCR and does not fabricate no-text content', async () => {
@@ -119,6 +130,14 @@ describe('local trusted image source inbox', () => {
     const reference = await analyzeSourceInbox(input([], null))
     expect(reference.status).toBe('reference_only')
     expect(() => approveSourceInboxPreview(reference, vi.fn())).toThrow(/Only usable/)
+  })
+
+  it('uses captured caption evidence for approved text sources without changing media provenance rules', async () => {
+    const preview = await analyzeSourceInbox(input([], 'Captured official caption'))
+    const approved = approveSourceInboxPreview(preview, (payload) => payload)
+
+    expect(approved).toMatchObject({ source_type: 'text', raw_text: 'Captured official caption', normalized_text: 'Captured official caption' })
+    expect(approved.source_metadata).toMatchObject({ source_inbox: { operator_caption: 'Captured official caption' } })
   })
 
   it('previews canonical reels structurally but requires an explicit official-source attestation before approval', async () => {

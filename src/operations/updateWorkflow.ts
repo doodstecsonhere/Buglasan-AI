@@ -57,6 +57,7 @@ export type BundleClassification =
   | 'new'
   | 'changed'
   | 'needs_identity_review'
+  | 'needs_review'
   | 'incomplete'
   | 'invalid'
 
@@ -104,6 +105,7 @@ export interface CorpusComparison {
   newSources: ScannedBundle[]
   changedSources: ScannedBundle[]
   needsIdentityReview: ScannedBundle[]
+  needsReview: ScannedBundle[]
   incomplete: ScannedBundle[]
   invalid: ScannedBundle[]
 }
@@ -427,6 +429,9 @@ export async function scanSourceBundles(options: ScanOptions = {}): Promise<Scan
     } else if (identity.status === 'needs_identity_review') {
       bundle.classification = 'needs_identity_review'
       bundle.classificationReason = identity.reason
+    } else if (media.some((item) => item.kind === 'video') && !caption) {
+      bundle.classification = 'needs_review'
+      bundle.classificationReason = 'Usable textual evidence or an accepted media-analysis mechanism is required for video intake'
     } else if (!caption && media.length === 0) {
       bundle.classification = 'incomplete'
       bundle.classificationReason = 'Bundle contains neither text caption nor media files'
@@ -455,6 +460,7 @@ export function compareCorpus(
     newSources: [],
     changedSources: [],
     needsIdentityReview: [],
+    needsReview: [],
     incomplete: [],
     invalid: [],
   }
@@ -467,6 +473,10 @@ export function compareCorpus(
     }
     if (bundle.classification === 'needs_identity_review' || bundle.identity.status === 'needs_identity_review') {
       comparison.needsIdentityReview.push(bundle)
+      continue
+    }
+    if (bundle.classification === 'needs_review') {
+      comparison.needsReview.push(bundle)
       continue
     }
     if (bundle.classification === 'invalid') {
@@ -519,6 +529,7 @@ export function formatPreviewReport(comparison: CorpusComparison): string {
     `New:                 ${comparison.newSources.length}`,
     `Changed:             ${comparison.changedSources.length}`,
     `Needs review:        ${comparison.needsIdentityReview.length}`,
+    `Needs content review: ${comparison.needsReview.length}`,
     `Incomplete:          ${comparison.incomplete.length}`,
     `Invalid:             ${comparison.invalid.length}`,
     '',
@@ -552,6 +563,16 @@ export function formatPreviewReport(comparison: CorpusComparison): string {
       lines.push(`! Bundle ${b.bundleId}`)
       lines.push(`  Raw URL: ${b.rawUrl ?? '(none)'}`)
       lines.push(`  Next human action: ${b.identity.reason ?? 'Provide canonical post/reel URL or sidecar identity.json'}`)
+      lines.push('')
+    }
+  }
+
+  if (comparison.needsReview.length > 0) {
+    lines.push('--- Bundles Needing Content Review ---')
+    for (const b of comparison.needsReview) {
+      lines.push(`! Bundle ${b.bundleId} [${b.identity.postId ?? 'unknown identity'}]`)
+      lines.push(`  URL: ${b.identity.canonicalUrl ?? b.rawUrl ?? '(none)'}`)
+      lines.push(`  Next human action: ${b.classificationReason ?? 'Provide usable textual evidence or an accepted media-analysis mechanism'}`)
       lines.push('')
     }
   }
@@ -862,6 +883,7 @@ export async function executeIntake(
       new: comparison.newSources.length,
       changed: comparison.changedSources.length,
       needs_review: comparison.needsIdentityReview.length,
+      needs_content_review: comparison.needsReview.length,
     },
   }
 
@@ -896,6 +918,7 @@ export function formatStatusReport(result: UpdateExecutionResult): string {
     `${result.admitted.length} new admitted`,
     `${comp.changedSources.length} changed`,
     `${comp.needsIdentityReview.length} needs identity review`,
+    `${comp.needsReview.length} needs content review`,
     '',
   ]
 

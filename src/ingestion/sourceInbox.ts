@@ -312,7 +312,9 @@ export async function analyzeSourceInbox(input: SourceInboxInput, provider: Medi
     if (image.failure !== null) return failedAnalysis(image, provider, collectedAt, image.failure)
     try { return await provider.analyzeImage(image, input.images[index].bytes, collectedAt) } catch (error) { return failedAnalysis(image, provider, collectedAt, error instanceof Error ? error.message : 'provider error') }
   }))
-  const videoAnalyses = await Promise.all(videoEvidence.map(async (video, index) => {
+  // A captured caption is accepted textual evidence; attached video remains provenance
+  // and is not analyzed or represented as analyzed when that evidence is available.
+  const videoAnalyses = caption !== null ? [] : await Promise.all(videoEvidence.map(async (video, index) => {
     if (video.failure !== null) return failedVideoAnalysis(video, provider, collectedAt, video.failure)
     if (!provider.analyzeVideo) return failedVideoAnalysis(video, provider, collectedAt, 'local video provider is not configured')
     try { return await provider.analyzeVideo(video, videos[index].bytes, collectedAt) } catch (error) { return failedVideoAnalysis(video, provider, collectedAt, error instanceof Error ? error.message : 'provider error') }
@@ -358,16 +360,17 @@ export function approveSourceInboxPreview<Result>(preview: SourceInboxPreview, d
   return ingestGenericCollectorRecord({
     source: { type: 'facebook', identity: preview.reference.identity, reference: preview.reference.post_url },
     event: { cycle: null, festival_year: preview.festival_year }, published_at: null,
-    // Operator caption is provenance only. Derived local evidence is the only media text
-    // passed through the established ingress, never represented as Facebook body text.
-    content: { raw_text: derivedIngressText(preview), normalized_text: derivedIngressText(preview), title: null, source_type: preview.source_type, media_urls: [] },
+    // A text-only preview's captured caption is its supplied text evidence. For media
+    // previews it remains provenance only; only derived local media evidence is ingested.
+    content: { raw_text: ingressText(preview), normalized_text: ingressText(preview), title: null, source_type: preview.source_type, media_urls: [] },
     metadata, authority: { label: 'Operator-provided official Buglasan Facebook reference', official: true },
     acquisition: { state: 'operator_provided_content', collected_at: preview.analyses[0]?.analyzed_at ?? preview.video_analyses[0]?.analyzed_at ?? new Date().toISOString(), collection_method: 'manual' },
     eligibility: { eligible: true, reason: null }, validation: { failure: null },
   }, dispatch)
 }
 
-function derivedIngressText(preview: SourceInboxPreview): string | null {
+function ingressText(preview: SourceInboxPreview): string | null {
+  if (preview.operator_caption !== null) return preview.operator_caption
   const text = preview.video_analyses.filter((analysis) => analysis.failure === null).map((analysis) => analysis.derived_evidence).filter(Boolean).join('\n\n')
   return text === '' ? null : text
 }

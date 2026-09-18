@@ -49,6 +49,7 @@ async function main(): Promise<void> {
         new: comparison.newSources.length,
         changed: comparison.changedSources.length,
         needs_identity_review: comparison.needsIdentityReview.length,
+        needs_content_review: comparison.needsReview.length,
         incomplete: comparison.incomplete.length,
         invalid: comparison.invalid.length,
         proposed_intake: comparison.newSources.map((b) => ({
@@ -60,6 +61,12 @@ async function main(): Promise<void> {
           bundle_id: b.bundleId,
           raw_url: b.rawUrl,
           reason: b.identity.reason,
+        })),
+        needs_content_review: comparison.needsReview.map((b) => ({
+          bundle_id: b.bundleId,
+          post_id: b.identity.postId,
+          canonical_url: b.identity.canonicalUrl,
+          reason: b.classificationReason,
         })),
       }, null, 2))
     } else {
@@ -90,6 +97,7 @@ async function main(): Promise<void> {
         new: comparison.newSources.length,
         changed: comparison.changedSources.length,
         needs_review: comparison.needsIdentityReview.length,
+        needs_content_review: comparison.needsReview.length,
       },
     }, null, 2))
   } else {
