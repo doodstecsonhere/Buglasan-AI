@@ -26,6 +26,10 @@ import {
   isExactOfficialFacebookPostUrl,
   shouldUseZeroEvidenceFallback,
   isValidCitationSource,
+  doesAnswerBroadenSubjectScope,
+  extractSubjectScopeMarkers,
+  buildSubjectScopeGuidance,
+  truncatePreservingSubjectScope,
   type GroundingSourceRecord,
 } from './grounding.ts'
 
@@ -198,4 +202,34 @@ Deno.test('grounding: isolated failure simulation keeps evidence failures ground
   // provider content without an unauthenticated production failure switch.
   assertEquals(buildRecoverableFailureFallback(withEvidence, 'en'), buildGroundedGenerationFallback('en'))
   assertEquals(buildRecoverableFailureFallback(withoutEvidence, 'en'), buildTemporaryServiceError('en'))
+})
+
+Deno.test('grounding: subject scope markers extract specific named events and hashtags', () => {
+  const text = 'Buglas Camp Fest 2026 is confirmed at Dons Magna. #BuglasCampFest2026 #CampFest The festival parade starts at Freedom Park.'
+  const markers = extractSubjectScopeMarkers(text)
+  assertEquals(markers.includes('#BuglasCampFest2026'), true)
+  assertEquals(markers.includes('#CampFest'), true)
+  assertEquals(markers.includes('Buglas Camp Fest 2026'), true)
+})
+
+Deno.test('grounding: subject scope guidance is present and specific', () => {
+  const guidance = buildSubjectScopeGuidance()
+  assertEquals(guidance.includes('most specific subject'), true)
+  assertEquals(guidance.includes('child or sub-event'), true)
+  assertEquals(guidance.includes('never broaden'), true)
+})
+
+Deno.test('grounding: truncation preserves subject scope markers', () => {
+  const text = 'Buglas Camp Fest 2026 is confirmed at Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026 This is a long post with additional details that would normally be truncated.'
+  const truncated = truncatePreservingSubjectScope(text, 100)
+  assertEquals(truncated.includes('#BuglasCampFest2026'), true)
+  assertEquals(truncated.includes('[Subject scope from source:'), true)
+})
+
+Deno.test('grounding: subject scope broadening detection catches festival-wide claims from sub-event evidence', () => {
+  const subEventEvidence = 'Buglas Camp Fest 2026 is confirmed at Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026'
+  const broadenedAnswer = 'The festival location has been moved to Dons Magna, Dauin, Negros Oriental.'
+  const correctAnswer = 'Buglas Camp Fest 2026 is confirmed at Dons Magna, Dauin, Negros Oriental.'
+  assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, subEventEvidence, 'Buglasan Festival'), true)
+  assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, subEventEvidence, 'Buglasan Festival'), false)
 })

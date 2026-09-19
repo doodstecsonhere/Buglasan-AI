@@ -102,6 +102,18 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(code).toContain('Never return reasoning or chain-of-thought')
   })
 
+  it('includes subject scope guidance in extraction prompt', () => {
+    expect(code).toContain('SUBJECT SCOPE')
+    expect(code).toContain('specific child or sub-event')
+    expect(code).toContain('Do not generalize a sub-event venue/date/status change to the entire festival')
+  })
+
+  it('includes subject scope preservation fixture for Buglas Camp Fest', () => {
+    expect(code).toContain('subject-scope-test-buglas-camp-fest')
+    expect(code).toContain('Buglas Camp Fest 2026')
+    expect(code).toContain('Dons Magna, Dauin, Negros Oriental')
+  })
+
   it('does not compile date-only fixture evidence into invented midnight timestamps', () => {
     expect(code).not.toMatch(/start_datetime:\s*'[^']*T00:00:00[+]08:00'/)
   })

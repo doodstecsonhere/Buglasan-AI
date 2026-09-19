@@ -99,4 +99,69 @@ describe('knowledge extraction contract', () => {
     expect(outcome.reasons).toEqual(expect.arrayContaining(['unsupported_alias_removed', 'unsupported_fee_removed']))
     expect(outcome.needsReview).toBe(true)
   })
+
+  it('preserves specific sub-event subject scope in event_name', () => {
+    const subEventSource = 'Buglas Camp Fest 2026 is confirmed on October 18, 2026 at 6:00 PM at Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026 #CampFest'
+    const subEvent = {
+      event_name: 'Buglas Camp Fest 2026',
+      aliases: [],
+      description: null,
+      category: 'competition',
+      start_datetime: '2026-10-18T18:00:00+08:00',
+      end_datetime: null,
+      venue: 'Dons Magna, Dauin, Negros Oriental',
+      organizer: null,
+      deadline: null,
+      eligibility: null,
+      fee_kind: 'unknown',
+      fees: null,
+      contact_info: null,
+      status: 'confirmed',
+      festival_year: 2026,
+      evidence: [
+        { field: 'event_name', excerpt: 'Buglas Camp Fest 2026' },
+        { field: 'category', excerpt: 'CampFest' },
+        { field: 'start_datetime', excerpt: 'October 18, 2026 at 6:00 PM' },
+        { field: 'venue', excerpt: 'Dons Magna, Dauin, Negros Oriental' },
+        { field: 'status', excerpt: 'confirmed' },
+        { field: 'festival_year', excerpt: '2026' },
+      ],
+      review_reasons: [],
+    }
+    const outcome = validateExtractionResult({ candidates: [subEvent], source_summary: null }, subEventSource)
+    expect(outcome.result.candidates[0].event_name).toBe('Buglas Camp Fest 2026')
+    expect(outcome.result.candidates[0].venue).toBe('Dons Magna, Dauin, Negros Oriental')
+    expect(outcome.needsReview).toBe(false)
+  })
+
+  it('rejects generalized festival-wide claims when evidence only supports sub-event scope', () => {
+    const subEventSource = 'Buglas Camp Fest 2026 is confirmed on October 18, 2026 at 6:00 PM at Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026'
+    const generalized = {
+      event_name: 'Buglasan Festival',
+      aliases: [],
+      description: null,
+      category: null,
+      start_datetime: '2026-10-18T18:00:00+08:00',
+      end_datetime: null,
+      venue: 'Dons Magna, Dauin, Negros Oriental',
+      organizer: null,
+      deadline: null,
+      eligibility: null,
+      fee_kind: 'unknown',
+      fees: null,
+      contact_info: null,
+      status: 'confirmed',
+      festival_year: 2026,
+      evidence: [
+        { field: 'event_name', excerpt: 'Buglasan Festival' },
+        { field: 'start_datetime', excerpt: 'October 18, 2026 at 6:00 PM' },
+        { field: 'venue', excerpt: 'Dons Magna, Dauin, Negros Oriental' },
+        { field: 'status', excerpt: 'confirmed' },
+        { field: 'festival_year', excerpt: '2026' },
+      ],
+      review_reasons: [],
+    }
+    expect(() => validateExtractionResult({ candidates: [generalized], source_summary: null }, subEventSource))
+      .toThrow('event_name is asserted without evidence')
+  })
 })
