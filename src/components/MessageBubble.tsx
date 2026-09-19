@@ -66,32 +66,47 @@ export function renderCitedContent(content: unknown, sources: unknown) {
   // Only the structured Evidence panel makes a trailing model-generated bibliography redundant.
   const safeContent = safeSources.length > 0 ? stripTrailingSourcesSection(rawContent, safeSources) : rawContent
   const sourceById = new Map(safeSources.map((source) => [source.id, source]))
-  const parts = safeContent.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[Source\s+\d+\])/g)
+  // A single "[Source N]" or a compound "[Source 2, Source 3]" / "[Source 2 and 3]"
+  // reference is captured whole. The group is anchored on the literal "Source"
+  // keyword so unrelated bracketed text ("[Note 1]", "[2]") is never transformed.
+  const parts = safeContent.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[\s*Source\s+\d+(?:\s*(?:,|&|\band\b)\s*(?:Source\s+)?\s*\d+)*\s*\])/g)
 
-  return parts.map((part, index) => {
+  return parts.flatMap((part, index) => {
     const idMatch = part.match(/^_\(src:\s*([a-zA-Z0-9_-]+)\)_$/)
-    const numberMatch = part.match(/^\[Source\s+(\d+)\]$/)
-    const source = idMatch
-      ? sourceById.get(idMatch[1])
-      : numberMatch
-        ? safeSources[Number(numberMatch[1]) - 1]
-        : undefined
+    if (idMatch) {
+      const source = sourceById.get(idMatch[1])
+      if (source) return [citationAnchor(source, safeSources, `${source.id}-${index}`)]
+      return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
+    }
 
-    if (!source) return <span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>
-    return (
-      <a
-        key={`${source.id}-${index}`}
-        href={trustedSourceUrl(source) ?? undefined}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="ml-1 inline-flex align-super text-xs font-semibold text-brand-blue underline-offset-2 hover:underline"
-        aria-label={`Open source: ${source.title}`}
-        title={source.title}
-      >
-        [{safeSources.indexOf(source) + 1}]
-      </a>
-    )
+    const bracketMatch = part.match(/^\[\s*Source\s+\d+(?:\s*(?:,|&|\band\b)\s*(?:Source\s+)?\s*\d+)*\s*\]$/i)
+    if (bracketMatch) {
+      const resolved = (part.match(/\d+/g) ?? [])
+        .map((value) => safeSources[Number(value) - 1])
+        .filter((source): source is SourceCitation => !!source)
+      if (resolved.length === 0) return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
+      if (resolved.length === 1) return [citationAnchor(resolved[0], safeSources, `${resolved[0].id}-${index}`)]
+      return [(<span key={`compound-${index}`} className="ml-1 inline-flex align-super gap-1 text-xs font-semibold text-brand-blue">{resolved.map((source, sourceIndex) => citationAnchor(source, safeSources, `${source.id}-${index}-${sourceIndex}`, false))}</span>)]
+    }
+
+    return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
   })
+}
+
+function citationAnchor(source: SourceCitation, evidence: readonly SourceCitation[], key: string, withLeftMargin = true) {
+  return (
+    <a
+      key={key}
+      href={trustedSourceUrl(source) ?? undefined}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${withLeftMargin ? 'ml-1 ' : ''}inline-flex items-center align-super text-xs font-semibold text-brand-blue underline-offset-2 hover:underline`}
+      aria-label={`Open source: ${source.title}`}
+      title={source.title}
+    >
+      [{evidence.indexOf(source) + 1}]
+    </a>
+  )
 }
 
 // Deterministic trailing-bibliography parser. A trailing block is only

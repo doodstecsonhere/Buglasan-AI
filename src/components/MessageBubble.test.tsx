@@ -272,4 +272,51 @@ describe('MessageBubble response rendering', () => {
     expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('Knowledge base')
     expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('newer update')
   })
+
+  describe('compound inline citations', () => {
+    const collectAnchors = (nodes: unknown[]): ReactElement<{ href?: string }>[] => nodes.flatMap((node) => {
+      if (!node || typeof node !== 'object') return []
+      if (Array.isArray(node)) return collectAnchors(node)
+      if (!isValidElement(node)) return []
+      const children = (node.props as { children?: unknown }).children
+      if (node.type === 'a') return [node as ReactElement<{ href?: string }>, ...collectAnchors(Array.isArray(children) ? children : [children])]
+      return collectAnchors(Array.isArray(children) ? children : [children])
+    })
+
+    it('renders a comma-separated compound reference as two links instead of literal text', () => {
+      const rendered = renderCitedContent('The parade and bazaar run together [Source 1, Source 2] today.', evidenceSources)
+      const text = renderedText(rendered)
+      expect(text).not.toContain('Source')
+      expect(text).toContain('today.')
+      const anchors = collectAnchors(rendered)
+      expect(anchors).toHaveLength(2)
+      expect(anchors.map(anchor => anchor.props.href)).toEqual(['https://negor.gov.ph/buglasan/1', 'https://negor.gov.ph/buglasan/2'])
+    })
+
+    it('renders an "and"-joined compound reference as links', () => {
+      const rendered = renderCitedContent('Both stages are open [Source 1 and Source 2].', evidenceSources)
+      const text = renderedText(rendered)
+      expect(text).not.toContain('Source')
+      expect(collectAnchors(rendered)).toHaveLength(2)
+    })
+
+    it('drops an out-of-range number from a compound reference but keeps the valid link', () => {
+      const rendered = renderCitedContent('Details [Source 1, Source 9].', evidenceSources)
+      const anchors = collectAnchors(rendered)
+      expect(anchors).toHaveLength(1)
+      expect(anchors[0].props.href).toBe('https://negor.gov.ph/buglasan/1')
+    })
+
+    it('leaves unrelated bracketed text untouched', () => {
+      const rendered = renderCitedContent('Meet at [Note 1, Note 2] near the harbor.', evidenceSources)
+      expect(renderedText(rendered)).toContain('[Note 1, Note 2]')
+      expect(collectAnchors(rendered)).toHaveLength(0)
+    })
+
+    it('does not treat a bare numeric bracket as a citation', () => {
+      const rendered = renderCitedContent('Reference [2, 3] is not a source link.', evidenceSources)
+      expect(renderedText(rendered)).toContain('[2, 3]')
+      expect(collectAnchors(rendered)).toHaveLength(0)
+    })
+  })
 })
