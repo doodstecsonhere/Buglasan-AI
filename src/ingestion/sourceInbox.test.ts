@@ -333,3 +333,114 @@ describe('complete multi-image source ingestion', () => {
     expect(inbox.analyses).toHaveLength(13)
   })
 })
+
+describe('image-derived knowledge ingress contract', () => {
+  const pngs = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `schedule-${String(i + 1).padStart(2, '0')}.png`, mimeType: 'image/png', bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, i]) }))
+  const many = (count: number, caption: string | null = 'Full Buglasan 2026 schedule') => input(pngs(count), caption)
+  // Deterministic fixture provider: every image yields name-derived text, so OCR
+  // quality is not part of this contract; a separate real-Tesseract test covers it.
+  const ocrProvider: MediaAnalysisProvider = {
+    id: 'ocr-fixture',
+    version: '1',
+    async analyzeImage(image, _bytes, analyzedAt) {
+      return { image_sha256: image.sha256, provider: 'ocr-fixture', provider_version: '1', method: 'ocr', analyzed_at: analyzedAt, confidence: 90, granularity: 'document', review_state: 'needs_review', text_state: 'text', ocr_text: `Schedule text for ${image.name}`, observations: [], warnings: ['OCR is machine-generated and must be checked against the source image.'], failure: null }
+    },
+  }
+  const section = (ordinal: number, name: string, sha256: string) => `[IMAGE ${ordinal} \u2014 ${name} | sha256:${sha256} OCR]\nSchedule text for ${name}`
+
+  it('keeps a text-only source payload unchanged', async () => {
+    const preview = await analyzeSourceInbox(many(0), ocrProvider)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    expect(payload.raw_text).toBe('Full Buglasan 2026 schedule')
+    expect(payload.normalized_text).toBe('Full Buglasan 2026 schedule')
+  })
+
+  it('leaves caption-only behavior for the deterministic-local provider unchanged', async () => {
+    const preview = await analyzeSourceInbox(many(3))
+    const payload = approveSourceInboxPreview(preview, (p) => p)
+    expect(payload.raw_text).toBe('Full Buglasan 2026 schedule')
+    expect(payload.raw_text).not.toContain('[IMAGE')
+  })
+
+  it('combines caption and per-image provenance-labelled OCR sections in deterministic evidence order', async () => {
+    const preview = await analyzeSourceInbox(many(3), ocrProvider)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    const expected = [
+      'Full Buglasan 2026 schedule',
+      ...preview.image_evidence.map((image, index) => section(index + 1, image.name, image.sha256)),
+    ].join('\n\n')
+    expect(payload.raw_text).toBe(expected)
+    expect(payload.normalized_text).toBe(expected)
+  })
+
+  it('includes early, middle, and final images of a 13-image bundle exactly once', async () => {
+    const preview = await analyzeSourceInbox(many(13), ocrProvider)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    const text = payload.raw_text!
+    for (const [ordinal, image] of preview.image_evidence.entries()) {
+      expect(text.split(section(ordinal + 1, image.name, image.sha256))).toHaveLength(2)
+    }
+    expect(text).toContain(section(13, 'schedule-13.png', preview.image_evidence[12].sha256))
+    // Each contributing image appears once; no hidden first-N cap.
+    expect(text.match(/\[IMAGE /g)).toHaveLength(13)
+  })
+
+  it('supplies image text for a caption-less image source that previously reached no text at all', async () => {
+    const preview = await analyzeSourceInbox(many(2, null), ocrProvider)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    expect(payload.source_type).toBe('image')
+    expect(payload.raw_text).toContain(section(1, 'schedule-01.png', preview.image_evidence[0].sha256))
+    expect(payload.raw_text).toContain(section(2, 'schedule-02.png', preview.image_evidence[1].sha256))
+  })
+
+  it('omits no-text and failed images from the knowledge text while keeping their explicit state in metadata', async () => {
+    const selective: MediaAnalysisProvider = {
+      id: 'ocr-fixture',
+      version: '1',
+      async analyzeImage(image, bytes, analyzedAt) {
+        if (image.name === 'schedule-02.png') return { ...(await ocrProvider.analyzeImage(image, bytes, analyzedAt)), text_state: 'no_text', ocr_text: null, review_state: 'not_required' }
+        if (image.name === 'schedule-03.png') throw new Error('recognizer crashed')
+        return ocrProvider.analyzeImage(image, bytes, analyzedAt)
+      },
+    }
+    const preview = await analyzeSourceInbox(many(4), selective)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    const text = payload.raw_text!
+    expect(text).not.toContain('schedule-02.png')
+    expect(text).not.toContain('schedule-03.png')
+    expect(text).toContain('Schedule text for schedule-01.png')
+    expect(text).toContain('Schedule text for schedule-04.png')
+    // Partial failure never becomes a falsely-complete source: every image keeps its own row.
+    const inbox = (payload.source_metadata as { source_inbox: { analyses: { image_sha256: string; text_state: string; failure: string | null }[] } }).source_inbox
+    expect(inbox.analyses).toHaveLength(4)
+    expect(inbox.analyses[1]).toMatchObject({ text_state: 'no_text', failure: null })
+    expect(inbox.analyses[2]).toMatchObject({ review_state: 'failed', failure: 'recognizer crashed' })
+  })
+
+  it('includes batch-analyzed image text for a >8-image bundle and stays idempotent across replays', async () => {
+    const batchProvider: MediaAnalysisProvider = {
+      id: 'batch-ocr-fixture',
+      version: '1',
+      maxImagesPerRequest: 8,
+      analyzeImage: async () => { throw new Error('unused') },
+      async analyzeImages(images, _bytes, analyzedAt) {
+        return images.map((image) => ({ image_sha256: image.sha256, provider: 'batch-ocr-fixture', provider_version: '1', method: 'ocr', analyzed_at: analyzedAt, confidence: null, granularity: 'document', review_state: 'needs_review' as const, text_state: 'text' as const, ocr_text: `Batch text for ${image.name}`, observations: [], warnings: [], failure: null }))
+      },
+    }
+    const first = approveSourceInboxPreview(await analyzeSourceInbox(many(13), batchProvider), (p) => p, { confirmOcrReview: true })
+    const replay = approveSourceInboxPreview(await analyzeSourceInbox(many(13), batchProvider), (p) => p, { confirmOcrReview: true })
+    expect(first.raw_text).toBe(replay.raw_text)
+    expect(first.raw_text).toContain('Batch text for schedule-13.png')
+    expect(first.raw_text!.match(/\[IMAGE /g)).toHaveLength(13)
+  })
+
+  it('traces each combined section back to a durable media provenance row', async () => {
+    const preview = await analyzeSourceInbox(many(2), ocrProvider)
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    const inbox = (payload.source_metadata as { source_inbox: { image_evidence: { name: string; sha256: string; size_bytes: number }[], analyses: { image_sha256: string; provider: string; method: string }[] } }).source_inbox
+    for (const [index, evidence] of inbox.image_evidence.entries()) {
+      expect(payload.raw_text).toContain(`| sha256:${evidence.sha256} OCR]`)
+      expect(inbox.analyses[index]).toMatchObject({ image_sha256: evidence.sha256, provider: 'ocr-fixture', method: 'ocr' })
+    }
+  })
+})

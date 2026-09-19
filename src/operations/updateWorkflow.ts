@@ -737,6 +737,33 @@ export interface ExecuteIntakeOptions {
   }>
   executionReportPath?: string
   collectedAt?: string
+  /**
+   * Media analysis provider for image-bearing bundles. It defaults to the
+   * established deterministic-local provider so existing behavior is unchanged;
+   * a caller that provisions the checked-in offline Tesseract runtime passes an
+   * OCR-backed provider so image-derived text reaches source knowledge.
+   */
+  imageProvider?: MediaAnalysisProvider
+  /**
+   * Bundle ids (or 'all') whose already-known sources are re-processed so improved
+   * media analysis can reach the same durable source. This never duplicates a
+   * source: the collector upserts by (platform, post_id), so an unchanged payload
+   * returns an idempotent no-op and only genuinely enriched text advances the
+   * fingerprint that downstream indexing and extraction are keyed on.
+   */
+  reanalyzeBundles?: readonly string[] | 'all'
+}
+
+/**
+ * Already-known bundles selected for deliberate re-analysis. Without an explicit
+ * selection this is always empty, so the normal update path never re-dispatches
+ * unchanged sources.
+ */
+export function selectReanalyzeCandidates(unchanged: readonly ScannedBundle[], selection: readonly string[] | 'all' | undefined): ScannedBundle[] {
+  if (selection === undefined) return []
+  if (selection === 'all') return [...unchanged]
+  const wanted = new Set(selection)
+  return unchanged.filter((bundle) => wanted.has(bundle.bundleId))
 }
 
 export async function executeIntake(
@@ -762,7 +789,7 @@ export async function executeIntake(
     }
   }
 
-  const eligible = [...comparison.newSources, ...comparison.changedSources]
+  const eligible = [...comparison.newSources, ...comparison.changedSources, ...selectReanalyzeCandidates(comparison.unchanged, options.reanalyzeBundles)]
   if (eligible.length === 0) {
     return {
       status: 'already_current',
@@ -784,6 +811,7 @@ export async function executeIntake(
 
   const dispatch = options.dispatcher ?? dispatchApprovedProductionSource
   const downstreamFn = options.downstreamRunner ?? invokeDownstreamForSource
+  const imageProvider = options.imageProvider ?? deterministicLocalImageProvider
   const collectedAt = options.collectedAt ?? new Date().toISOString()
 
   const admitted: AdmittedSourceOutcome[] = []
@@ -819,7 +847,7 @@ export async function executeIntake(
       videos: inboxVideos,
       collectedAt,
       festivalYear: 2026,
-    }, deterministicLocalImageProvider)
+    }, imageProvider)
 
     // Approve preview to payload
     const payload = approveSourceInboxPreview(preview, (p) => p, {

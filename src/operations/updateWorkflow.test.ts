@@ -9,9 +9,11 @@ import {
   formatPreviewReport,
   formatStatusReport,
   resolveBundleIdentity,
+  selectReanalyzeCandidates,
   type ScannedBundle,
   type DurableSourceRecord,
 } from './updateWorkflow'
+import type { MediaAnalysisProvider } from '../ingestion/sourceInbox'
 
 describe('Buglasan Live Operations — Source Updating Workflow', () => {
   // Helper to create a temporary source bundle directory
@@ -574,6 +576,121 @@ describe('Buglasan Live Operations — Source Updating Workflow', () => {
       expect(id.status).toBe('resolved')
       expect(id.postId).toBe('987654321')
       expect(id.identitySource).toBe('manifest_field')
+    })
+  })
+
+  // Image-derived knowledge reaching the bulk Live Ops intake path
+  describe('image-derived knowledge in the bulk intake path', () => {
+    // Deterministic fixture provider: every image yields name-derived text, so OCR
+    // quality is not part of this contract; the sourceInbox suite covers the
+    // ingressText shape and a separate real-Tesseract test covers extraction.
+    const fakeOcrProvider: MediaAnalysisProvider = {
+      id: 'ocr-fixture',
+      version: '1',
+      async analyzeImage(image, _bytes, analyzedAt) {
+        return { image_sha256: image.sha256, provider: 'ocr-fixture', provider_version: '1', method: 'ocr', analyzed_at: analyzedAt, confidence: 90, granularity: 'document', review_state: 'needs_review', text_state: 'text', ocr_text: `Schedule content of ${image.name}`, observations: [], warnings: [], failure: null }
+      },
+    }
+
+    async function createImageBundle(imageCount: number): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+      const dir = await mkdtemp(join(tmpdir(), 'buglasan-img-'))
+      const bundle = join(dir, '36')
+      await mkdir(bundle)
+      await writeFile(join(bundle, 'manifest.txt'), 'URL:\nhttps://www.facebook.com/Buglasan/posts/1501746578657062\n\nCAPTION:\nBuglasan 2026 full festival schedule')
+      for (let i = 0; i < imageCount; i++) {
+        await writeFile(join(bundle, `schedule-${String(i + 1).padStart(2, '0')}.png`), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, i]))
+      }
+      return { dir, cleanup: async () => { await rm(dir, { recursive: true, force: true }) } }
+    }
+
+    it('keeps caption-only payload when no OCR provider is injected (regression)', async () => {
+      const { dir, cleanup } = await createImageBundle(13)
+      try {
+        const comparison = compareCorpus(await scanSourceBundles({ sourceRoot: dir }), [])
+        let captured: any = null
+        await executeIntake(comparison, {
+          confirmProduction: true,
+          dispatcher: async (payload) => { captured = payload; return { status: 'new', sourceId: 'uuid-36', postId: payload.post_id } },
+          downstreamRunner: async () => ({ indexing: 'indexed', extraction: 'extracted', reconciliations: [] }),
+        })
+        expect(captured.raw_text).toBe('Buglasan 2026 full festival schedule')
+        expect(captured.raw_text).not.toContain('[IMAGE')
+      } finally { await cleanup() }
+    })
+
+    it('reaches source knowledge for every image when an OCR provider is injected', async () => {
+      const { dir, cleanup } = await createImageBundle(13)
+      try {
+        const comparison = compareCorpus(await scanSourceBundles({ sourceRoot: dir }), [])
+        let captured: any = null
+        await executeIntake(comparison, {
+          confirmProduction: true,
+          imageProvider: fakeOcrProvider,
+          dispatcher: async (payload) => { captured = payload; return { status: 'new', sourceId: 'uuid-36', postId: payload.post_id } },
+          downstreamRunner: async () => ({ indexing: 'indexed', extraction: 'extracted', reconciliations: [] }),
+        })
+        const text: string = captured.raw_text
+        expect(text).toContain('Buglasan 2026 full festival schedule')
+        expect(text.match(/\[IMAGE /g)).toHaveLength(13)
+        // Early, middle, and final images all contribute provenance-labelled text.
+        expect(text).toContain('[IMAGE 1 \u2014 schedule-01.png')
+        expect(text).toContain('[IMAGE 7 \u2014 schedule-07.png')
+        expect(text).toContain('[IMAGE 13 \u2014 schedule-13.png')
+      } finally { await cleanup() }
+    })
+
+    it('never re-dispatches an unchanged source unless deliberately selected for re-analysis', async () => {
+      const { dir, cleanup } = await createImageBundle(3)
+      try {
+        const bundles = await scanSourceBundles({ sourceRoot: dir })
+        const durable: DurableSourceRecord[] = [{ id: 'uuid-36', post_id: '1501746578657062', post_url: 'https://www.facebook.com/Buglasan/posts/1501746578657062/', content_fingerprint: bundles[0].contentFingerprint! }]
+        const comparison = compareCorpus(bundles, durable)
+        expect(comparison.unchanged).toHaveLength(1)
+        expect(comparison.newSources).toHaveLength(0)
+
+        // Default: unchanged sources are untouched.
+        const untouched = vi.fn()
+        const resultDefault = await executeIntake(comparison, { confirmProduction: true, dispatcher: untouched, imageProvider: fakeOcrProvider })
+        expect(resultDefault.status).toBe('already_current')
+        expect(untouched).not.toHaveBeenCalled()
+
+        // Selecting a non-present bundle still dispatches nothing.
+        const noMatch = vi.fn()
+        await executeIntake(comparison, { confirmProduction: true, reanalyzeBundles: ['999'], dispatcher: noMatch, imageProvider: fakeOcrProvider })
+        expect(noMatch).not.toHaveBeenCalled()
+
+        // Selecting the known bundle re-dispatches it under the same identity, and the
+        // collector status is passed straight through (idempotent no-op for unchanged content).
+        let captured: any = null
+        const resultRe = await executeIntake(comparison, {
+          confirmProduction: true,
+          reanalyzeBundles: ['36'],
+          imageProvider: fakeOcrProvider,
+          dispatcher: async (payload) => { captured = payload; return { status: 'idempotent no-op', sourceId: 'uuid-36', postId: payload.post_id } },
+          downstreamRunner: async () => ({ indexing: 'no_text', extraction: 'no_event', reconciliations: [] }),
+        })
+        expect(resultRe.status).toBe('intake_completed')
+        expect(resultRe.admitted).toHaveLength(1)
+        expect(resultRe.admitted[0].status).toBe('idempotent no-op')
+        expect(resultRe.admitted[0].postId).toBe('1501746578657062')
+        expect(captured.post_id).toBe('1501746578657062')
+        expect(captured.raw_text).toContain('[IMAGE 3 \u2014 schedule-03.png')
+      } finally { await cleanup() }
+    })
+  })
+
+  describe('selectReanalyzeCandidates', () => {
+    const bundle = (bundleId: string): ScannedBundle => ({ bundleId, bundleNumber: Number(bundleId), bundlePath: '', manifestPath: null, sidecarPath: null, caption: null, rawUrl: null, identity: { status: 'resolved', postId: bundleId, canonicalUrl: '', identitySource: 'none' }, media: [] })
+    const unchanged = [bundle('1'), bundle('36'), bundle('7')]
+
+    it('returns nothing without an explicit selection', () => {
+      expect(selectReanalyzeCandidates(unchanged, undefined)).toEqual([])
+    })
+    it('selects all unchanged bundles for "all"', () => {
+      expect(selectReanalyzeCandidates(unchanged, 'all').map((b) => b.bundleId)).toEqual(['1', '36', '7'])
+    })
+    it('selects only present, requested bundle ids and ignores unknown ones', () => {
+      expect(selectReanalyzeCandidates(unchanged, ['36', '999']).map((b) => b.bundleId)).toEqual(['36'])
     })
   })
 })

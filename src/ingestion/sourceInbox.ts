@@ -409,8 +409,6 @@ export function approveSourceInboxPreview<Result>(preview: SourceInboxPreview, d
   return ingestGenericCollectorRecord({
     source: { type: 'facebook', identity: preview.reference.identity, reference: preview.reference.post_url },
     event: { cycle: null, festival_year: preview.festival_year }, published_at: null,
-    // A text-only preview's captured caption is its supplied text evidence. For media
-    // previews it remains provenance only; only derived local media evidence is ingested.
     content: { raw_text: ingressText(preview), normalized_text: ingressText(preview), title: null, source_type: preview.source_type, media_urls: [] },
     metadata, authority: { label: 'Operator-provided official Buglasan Facebook reference', official: true },
     acquisition: { state: 'operator_provided_content', collected_at: preview.analyses[0]?.analyzed_at ?? preview.video_analyses[0]?.analyzed_at ?? new Date().toISOString(), collection_method: 'manual' },
@@ -418,10 +416,33 @@ export function approveSourceInboxPreview<Result>(preview: SourceInboxPreview, d
   }, dispatch)
 }
 
+/**
+ * Combines the accepted textual evidence for an approved preview into the single
+ * source knowledge text: the operator caption first, then one provenance-labelled
+ * section per image that actually yielded text, then any video derived evidence.
+ * Every section header carries the 1-based evidence ordinal, the original filename,
+ * and the durable SHA-256 so image-derived text remains traceable to its originating
+ * media item after combination. An image contributes text only when its analysis
+ * explicitly succeeded with detected text (`text_state: 'text'`); no-text, unknown,
+ * and failed states contribute nothing here and stay visible through their explicit
+ * per-image rows in `source_metadata.source_inbox.analyses`. Nothing is silently
+ * omitted: evidence order bounds the sections, so every one of N accepted images is
+ * accounted for in metadata and every image-bearing section appears in order.
+ */
 function ingressText(preview: SourceInboxPreview): string | null {
-  if (preview.operator_caption !== null) return preview.operator_caption
-  const text = preview.video_analyses.filter((analysis) => analysis.failure === null).map((analysis) => analysis.derived_evidence).filter(Boolean).join('\n\n')
-  return text === '' ? null : text
+  const parts: string[] = []
+  if (preview.operator_caption !== null) parts.push(preview.operator_caption)
+  preview.analyses.forEach((analysis, index) => {
+    if (analysis.failure !== null || analysis.text_state !== 'text' || analysis.ocr_text === null || analysis.ocr_text.trim() === '') return
+    const image = preview.image_evidence[index]
+    if (image === undefined || image.sha256 !== analysis.image_sha256) return
+    parts.push(`[IMAGE ${index + 1} \u2014 ${image.name} | sha256:${analysis.image_sha256} OCR]\n${analysis.ocr_text}`)
+  })
+  // A captured caption is accepted textual evidence; attached video remains provenance
+  // and is not analyzed or represented as analyzed when that evidence is available.
+  const videoText = preview.video_analyses.filter((analysis) => analysis.failure === null).map((analysis) => analysis.derived_evidence).filter(Boolean).join('\n\n')
+  if (videoText !== '') parts.push(videoText)
+  return parts.length === 0 ? null : parts.join('\n\n')
 }
 
 export type { SourceIngestionPayload }
