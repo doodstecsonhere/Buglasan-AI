@@ -144,6 +144,62 @@ describe('MessageBubble response rendering', () => {
     expect(text).toContain('Official source one')
   })
 
+  it('drops the live production bullet bibliography with adjacent [N] citation markers', async () => {
+    const { stripTrailingSourcesSection } = await import('./MessageBubble')
+    const input = 'The festival approaches! 🎉\n---\nSources:\n* [1]FACEBOOK | Pickleball Tournament Preparations\n* [2]FACEBOOK | Buglasan Festival Profile Picture Update\n* [3]FACEBOOK | Buglasan Festival Parade Lineup\n* [4]FACEBOOK | Buglas Camp Fest 2026 Venue Update & Registration'
+    expect(stripTrailingSourcesSection(input, [...evidenceSources, { id: 'official-source-3', postId: 'official-3', title: 'Official source three', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/3', publishedAt: null, festivalYear: 2026, status: 'active' } as SourceCitation, { id: 'official-source-4', postId: 'official-4', title: 'Official source four', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/4', publishedAt: null, festivalYear: 2026, status: 'active' } as SourceCitation])).toBe('The festival approaches! 🎉')
+    const rendered = renderCitedContent(input, [
+      ...evidenceSources,
+      { id: 'official-source-3', postId: 'official-3', title: 'Official source three', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/3', publishedAt: null, festivalYear: 2026, status: 'active' },
+      { id: 'official-source-4', postId: 'official-4', title: 'Official source four', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/4', publishedAt: null, festivalYear: 2026, status: 'active' },
+    ])
+    const text = renderedText(rendered)
+
+    expect(text).toContain('The festival approaches! 🎉')
+    expect(text).not.toContain('Sources:')
+    expect(text).not.toContain('Pickleball Tournament Preparations')
+    expect(text).not.toContain('Buglas Camp Fest 2026 Venue Update & Registration')
+    expect(text).not.toContain('---')
+  })
+
+  it('drops the live production --Sources numbered bibliography with trailing citations', () => {
+    const input = 'The festival approaches!\n--Sources\n1. Facebook post about pickleball preparations – [1]\n2. Facebook notice about another update – [2]\n3. Facebook post about another event – [3]'
+    const rendered = renderCitedContent(input, [
+      ...evidenceSources,
+      { id: 'official-source-3', postId: 'official-3', title: 'Official source three', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/3', publishedAt: null, festivalYear: 2026, status: 'active' },
+    ])
+    const text = renderedText(rendered)
+
+    expect(text).toContain('The festival approaches!')
+    expect(text).not.toContain('--Sources')
+    expect(text).not.toContain('Facebook post about pickleball preparations')
+    expect(text).not.toContain('[3]')
+  })
+
+  it('drops a markdown Citations bibliography and keeps preceding answer bytes intact', async () => {
+    const { stripTrailingSourcesSection } = await import('./MessageBubble')
+    const input = 'The harbor lights stay on until midnight.\n### Citations\n[Source 1] Official source one\n[Source 2] Official source two'
+    expect(stripTrailingSourcesSection(input, evidenceSources)).toBe('The harbor lights stay on until midnight.')
+  })
+
+  it('keeps an inline [1] marker inside normal prose untouched by the parser', async () => {
+    const { stripTrailingSourcesSection } = await import('./MessageBubble')
+    const input = 'The parade starts at [1] near the harbor, updated for 2026.'
+    expect(stripTrailingSourcesSection(input, evidenceSources)).toBe(input)
+  })
+
+  it('preserves a substantive numbered schedule whose entries end in bracketed citations', async () => {
+    const { stripTrailingSourcesSection } = await import('./MessageBubble')
+    const input = 'Join us for the following:\n1. Opening parade – [1]\n2. Food bazaar – [2]\nSee you at the harbor!'
+    expect(stripTrailingSourcesSection(input, evidenceSources)).toBe(input)
+  })
+
+  it('preserves a bibliography whose citations do not map onto the structured Evidence', async () => {
+    const { stripTrailingSourcesSection } = await import('./MessageBubble')
+    const input = 'Answer prose.\nSources:\n* [9]FACEBOOK | Phantom citation one\n* [10]FACEBOOK | Phantom citation two'
+    expect(stripTrailingSourcesSection(input, evidenceSources)).toBe(input)
+  })
+
   it('still renders the structured Evidence panel with its source count', async () => {
     const { SourcesCard } = await import('./SourcesCard')
     const collectText = (value: unknown): string => {

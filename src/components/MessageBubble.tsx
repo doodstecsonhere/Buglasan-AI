@@ -64,7 +64,7 @@ export function renderCitedContent(content: unknown, sources: unknown) {
   const safeSources = Array.isArray(sources) ? sources.filter((source): source is SourceCitation => !!source && typeof source === 'object' && typeof source.id === 'string' && typeof source.title === 'string') : []
   const rawContent = typeof content === 'string' && content.trim() ? content : 'Unable to display this message.'
   // Only the structured Evidence panel makes a trailing model-generated bibliography redundant.
-  const safeContent = safeSources.length > 0 ? stripTrailingSourcesSection(rawContent) : rawContent
+  const safeContent = safeSources.length > 0 ? stripTrailingSourcesSection(rawContent, safeSources) : rawContent
   const sourceById = new Map(safeSources.map((source) => [source.id, source]))
   const parts = safeContent.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[Source\s+\d+\])/g)
 
@@ -96,12 +96,29 @@ export function renderCitedContent(content: unknown, sources: unknown) {
 
 // Deterministic trailing-bibliography parser. A trailing block is only
 // suppressed when every line of it is clearly bibliography decoration or a
-// citation-mapped entry, so substantive prose (even under a heading that
-// mentions sources) is never deleted.
-const BIBLIOGRAPHY_HEADING_PATTERN = /^[^\w\s]*\s*(?:sources?|references?|citations?)\s*:?\s*$/i
-const BIBLIOGRAPHY_ENTRY_PATTERN = /^(?:[-*+]|\d+[.)]\s+)?\s*(?:\[\s*Source\s+\d+\s*\]|_\(src: [a-zA-Z0-9_-]+\)_)(?:\s+[^\n]*?)?(?:\s+(?:https?:\/\/|fb\.me\/)[^\s<]*)?\s*$/i
+// citation entry, and at least one entry's citation marker maps onto a
+// structured Evidence source already rendered by the Evidence panel, so
+// substantive prose (even under a heading that mentions sources) and lists
+// with unrelated citations are never deleted.
+const BIBLIOGRAPHY_HEADING_PATTERN = /^(?:[-*+_]{2,}|[^\w\s]*)\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:sources?|references?|citations?)\s*:?(?:\*\*|__)?\s*$/i
+const BIBLIOGRAPHY_SEPARATOR_PATTERN = /^[-*_]{3,}$/
+const BIBLIOGRAPHY_ENTRY_PATTERN = /^(?:(?:[-*+]|\d+[.)])\s*)?(?:\[\s*Source\s+\d+\s*\]|_\(src: [a-zA-Z0-9_-]+\)_|\[\d+\][^\s\]])[^\n]*(?:\s+(?:https?:\/\/|fb\.me\/)[^\s<]*)?\s*$/i
+const BIBLIOGRAPHY_TRAILING_CITATION_PATTERN = /\s(?:[-\u2013\u2014])\s+\[\s*(?:Source\s+)?\d+\s*\]\s*$/i
+const BIBLIOGRAPHY_CITATION_MARKER_PATTERN = /\[\s*(?:Source\s+)?(\d+)\s*\]|_\(src:\s*([a-zA-Z0-9_-]+)\)_/gi
 
-export function stripTrailingSourcesSection(text: string): string {
+function bibliographyEntryReferencesEvidence(line: string, evidence: readonly SourceCitation[]): boolean {
+  for (const marker of line.matchAll(BIBLIOGRAPHY_CITATION_MARKER_PATTERN)) {
+    if (marker[2] !== undefined) {
+      if (evidence.some((source) => source.id === marker[2])) return true
+      continue
+    }
+    const position = Number(marker[1]) - 1
+    if (Number.isInteger(position) && position >= 0 && position < evidence.length) return true
+  }
+  return false
+}
+
+export function stripTrailingSourcesSection(text: string, evidence: readonly SourceCitation[] = []): string {
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   let lastContentIndex = -1
   for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -112,19 +129,40 @@ export function stripTrailingSourcesSection(text: string): string {
   // A bibliography ends with either its heading (header-only tail) or a citation entry line.
   const lastLine = lines[lastContentIndex].trim()
   const lastIsHeading = BIBLIOGRAPHY_HEADING_PATTERN.test(lastLine)
-  if (!lastIsHeading && !BIBLIOGRAPHY_ENTRY_PATTERN.test(lastLine)) return text.trim()
+  const lastIsEntry = !lastIsHeading && (BIBLIOGRAPHY_ENTRY_PATTERN.test(lastLine) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(lastLine))
+  if (!lastIsHeading && !lastIsEntry) return text.trim()
 
   // Walk up over entry lines to locate the bibliography heading.
   let headingIndex = -1
+  let entryCount = 0
   for (let index = lastIsHeading ? lastContentIndex : lastContentIndex - 1; index >= 0; index -= 1) {
     const line = lines[index].trim()
     if (!line) continue
     if (BIBLIOGRAPHY_HEADING_PATTERN.test(line)) { headingIndex = index; break }
-    if (!BIBLIOGRAPHY_ENTRY_PATTERN.test(line)) return text.trim()
+    if (BIBLIOGRAPHY_SEPARATOR_PATTERN.test(line)) continue
+    if (BIBLIOGRAPHY_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(line)) { entryCount += 1; continue }
+    return text.trim()
   }
   if (headingIndex < 0 || headingIndex === 0) return text.trim()
 
-  const kept = lines.slice(0, headingIndex).join('\n').trim()
+  // Safety signal: suppress only when a bibliography citation corresponds to a structured
+  // Evidence source already rendered, never for arbitrary bracketed numbers.
+  if (entryCount > 0) {
+    let referencesEvidence = false
+    for (let index = headingIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index].trim()
+      if (!line || BIBLIOGRAPHY_SEPARATOR_PATTERN.test(line) || BIBLIOGRAPHY_HEADING_PATTERN.test(line)) continue
+      if (bibliographyEntryReferencesEvidence(line, evidence)) { referencesEvidence = true; break }
+    }
+    if (!referencesEvidence) return text.trim()
+  }
+
+  // Swallow a bare separator heading directly above the bibliography boundary ("---\nSources:").
+  let boundaryIndex = headingIndex
+  while (boundaryIndex - 1 >= 0 && BIBLIOGRAPHY_SEPARATOR_PATTERN.test(lines[boundaryIndex - 1].trim())) boundaryIndex -= 1
+  if (boundaryIndex === 0) return text.trim()
+
+  const kept = lines.slice(0, boundaryIndex).join('\n').trim()
   return kept || text.trim()
 }
 
