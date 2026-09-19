@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
-import { renderCitedContent, renderMarkdownText, renderSafeLinks, warningCopy } from './MessageBubble'
+import { renderCitedContent, renderMarkdownText, renderSafeLinks, warningCopy, warningTone } from './MessageBubble'
 import type { SourceCitation } from '../types'
 
 describe('MessageBubble response rendering', () => {
@@ -216,6 +216,26 @@ describe('MessageBubble response rendering', () => {
     expect(JSON.stringify(card).replace(/\\\//g, '/')).toContain('https://negor.gov.ph/buglasan/2')
   })
 
+  it('Evidence lists each source once with a single Open source link, shows known dates and degrades unknown dates quietly', async () => {
+    const { SourcesCard } = await import('./SourcesCard')
+    const sources: SourceCitation[] = [
+      { id: 'a', postId: 'a', title: 'Parade update', platform: 'facebook', postUrl: 'https://www.facebook.com/Buglasan/posts/1', publishedAt: new Date('2026-09-18T00:00:00Z'), festivalYear: 2026, status: 'active' },
+      { id: 'b', postId: 'b', title: 'Venue note', platform: 'official', postUrl: 'https://negor.gov.ph/buglasan/venue', publishedAt: null, festivalYear: 2026, status: 'superseded' },
+    ]
+    const json = JSON.stringify(SourcesCard({ sources }))
+    // Exactly one outbound link per source: the title is the single "Open source" action.
+    const hrefs = [...json.matchAll(/"href":"(https:[^"]+)"/g)].map(match => match[1]).sort()
+    expect(hrefs).toEqual(['https://negor.gov.ph/buglasan/venue', 'https://www.facebook.com/Buglasan/posts/1'])
+    // The old duplicated "Open Source N" text link is gone.
+    expect(json).not.toMatch(/Open Source \d/)
+    // Known publication date rendered; unknown date omitted without an alarm label.
+    expect(json).toContain('2026')
+    expect(json).not.toMatch(/Publication date unknown/i)
+    // Meaningful current / superseded states still surfaced.
+    expect(json).toContain('Current')
+    expect(json).toContain('Superseded')
+  })
+
   it('renders headings and list items without exposing raw markdown markers', () => {
     const rendered = renderMarkdownText('### Schedule\n- Opening parade\n- Food bazaar')
     expect(rendered.some(node => isValidElement(node) && node.type === 'h3')).toBe(true)
@@ -268,9 +288,21 @@ describe('MessageBubble response rendering', () => {
     expect(renderSafeLinks('Not a link: https://')).toBe('Not a link: https://')
   })
 
-  it('explains freshness clearly without overstating confirmation', () => {
-    expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('Knowledge base')
-    expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('newer update')
+  it('presents ordinary freshness uncertainty as calm, honest information rather than an alarm', () => {
+    const copy = warningCopy('UNKNOWN_FRESHNESS')
+    expect(copy).toMatch(/latest information/i)
+    expect(copy).toMatch(/knowledge base/i)
+    expect(copy).toMatch(/may exist/i)
+    // Must not overstate confirmation nor imply live monitoring.
+    expect(copy).not.toMatch(/could not confirm/i)
+    expect(copy).not.toMatch(/monitor/i)
+  })
+
+  it('only treats genuine staleness as a warning, and uncertainty as informational', () => {
+    expect(warningTone('UNKNOWN_FRESHNESS')).toBe('info')
+    expect(warningTone('MIXED_FRESHNESS')).toBe('info')
+    expect(warningTone('STALE_SOURCE')).toBe('warning')
+    expect(warningTone('STALE_CORPUS')).toBe('warning')
   })
 
   describe('compound inline citations', () => {

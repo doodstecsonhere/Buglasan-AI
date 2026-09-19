@@ -7,7 +7,7 @@ export function FacebookBadge() {
         href={productConfig.officialSource.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-fiesta-red to-fiesta-orange text-white no-underline transition-all duration-200 hover:from-fiesta-red-dark hover:to-fiesta-orange-dark"
+        className="flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-blue text-white no-underline transition-colors duration-200 hover:bg-blue-800"
         aria-label={`Visit ${productConfig.officialSource.authorityLabel} ${productConfig.officialSource.pageLabel}`}
       >
         <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">

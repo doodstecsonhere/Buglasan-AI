@@ -22,7 +22,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
       
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
         {!isUser && message.freshness?.warning && message.freshness.warning !== 'NONE' && (
-          <div role="note" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+          <div role="note" className={warningToneClass(message.freshness.warning)}>
             {warningCopy(message.freshness.warning)}
           </div>
         )}
@@ -54,10 +54,28 @@ export function warningCopy(warning: AnswerWarning): string {
   switch (warning) {
     case 'STALE_SOURCE': return 'This time-sensitive answer relies on older source information. Verify the cited source for the latest update.'
     case 'STALE_CORPUS': return 'This time-sensitive answer could not be confirmed against a current knowledge base.'
-    case 'MIXED_FRESHNESS': return 'Some information used for this time-sensitive answer may be older than other sources.'
-    case 'UNKNOWN_FRESHNESS': return 'Knowledge base could not confirm whether a newer update supersedes this time-sensitive answer.'
+    case 'MIXED_FRESHNESS': return 'This answer draws on sources updated at different times. The most recent official source is listed in Evidence.'
+    case 'UNKNOWN_FRESHNESS': return 'This is the latest information in the Buglasan AI knowledge base. A newer official update may exist if it has not yet been added.'
     default: return ''
   }
+}
+
+/**
+ * A genuine staleness concern (STALE_SOURCE / STALE_CORPUS) is shown as a warning.
+ * Ordinary freshness uncertainty is only informational and must not alarm the reader
+ * or imply that Buglasan AI monitors official sources live.
+ */
+export type WarningTone = 'warning' | 'info'
+
+export function warningTone(warning: AnswerWarning): WarningTone {
+  return warning === 'STALE_SOURCE' || warning === 'STALE_CORPUS' ? 'warning' : 'info'
+}
+
+export function warningToneClass(warning: AnswerWarning): string {
+  const base = 'mb-2 rounded-lg border px-3 py-2 text-xs leading-5'
+  return warningTone(warning) === 'warning'
+    ? `${base} border-amber-200 bg-amber-50 text-amber-900`
+    : `${base} border-sky-100 bg-sky-50 text-sky-900`
 }
 
 export function renderCitedContent(content: unknown, sources: unknown) {
