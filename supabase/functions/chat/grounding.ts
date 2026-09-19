@@ -298,6 +298,32 @@ export function buildGroundedGenerationFallback(language: SupportedLanguage): st
   }[language]
 }
 
+/**
+ * Build a scoped fallback that preserves the most specific subject from evidence.
+ * Used when the generated answer broadened scope and we need to provide a safe,
+ * subject-scoped response using the evidence markers.
+ */
+export function buildScopedFallback(evidenceText: string, language: SupportedLanguage): string {
+  const markers = extractSubjectScopeMarkers(evidenceText)
+  const childMarkers = markers.filter((marker) => {
+    const compact = marker.replace(/^#/, '').replace(/[\s_-]+/g, '').toLocaleLowerCase()
+    // Filter out generic festival names and parent festival references
+    return compact.length > 0 && !compact.includes('festival') && !compact.includes('buglasan')
+  })
+
+  if (childMarkers.length > 0) {
+    const primarySubject = childMarkers[0].replace(/^#/, '')
+    return {
+      en: `For ${primarySubject}, please review the official source below for the latest information.`,
+      ceb: `Alang sa ${primarySubject}, palihog susiha ang opisyal nga tinubdan sa ubos alang sa kinabuhing impormasyon.`,
+      fil: `Para sa ${primarySubject}, pakisuri ang opisyal na source sa ibaba para sa pinakabagong impormasyon.`,
+    }[language]
+  }
+
+  // Fallback to generic message if no specific child markers found
+  return buildGroundedGenerationFallback(language)
+}
+
 /** Server-side wording rule for inclusive calendar-date calculations. */
 export function buildInclusiveDateArithmeticGuidance(language: SupportedLanguage): string {
   if (language === 'fil') {
@@ -318,4 +344,123 @@ export function getLexicalEvidenceTerms(query: string): string[] {
   return [...new Set((query.toLowerCase().match(/[\p{L}\p{N}]{5,}/gu) ?? [])
     .filter((term) => !LEXICAL_STOP_WORDS.has(term)))]
     .slice(0, 3)
+}
+
+const GENERIC_SUBJECT_HASHTAGS = new Set([
+  'venueupdate', 'howto', 'howtoregister', 'seeyouthere', 'register', 'update',
+  'newvenue', 'dauin', 'location', 'announcement', 'official', 'festival',
+])
+
+const EVENT_KIND = String.raw`Fest(?:ival)?|Camp\s+Fest|Parade|Concert|Competition|Pageant|Showdown|Workshop|Exhibit|Fair|Carnival|Expo|Camp`
+
+/**
+ * Collect the most specific named event subjects and identifying hashtags from
+ * evidence text. Used to keep child/sub-event facts bound to their subject when
+ * prompt context must be truncated.
+ */
+export function extractSubjectScopeMarkers(text: string): string[] {
+  if (typeof text !== 'string' || !text.trim()) return []
+  const markers: string[] = []
+  const seen = new Set<string>()
+  const remember = (value: string) => {
+    const normalized = value.replace(/\s+/g, ' ').trim()
+    if (!normalized) return
+    const key = normalized.toLocaleLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    markers.push(normalized)
+  }
+
+  for (const match of text.matchAll(/#([\p{L}\p{N}][\p{L}\p{N}_-]{2,})/gu)) {
+    const tag = match[1]
+    if (GENERIC_SUBJECT_HASHTAGS.has(tag.toLocaleLowerCase())) continue
+    if (!new RegExp(EVENT_KIND, 'i').test(tag.replace(/[_-]+/g, ' '))) continue
+    remember(`#${tag}`)
+  }
+
+  const titled = new RegExp(
+    String.raw`\b((?:[\p{Lu}][\p{L}\p{N}'’-]+\s+){0,6}(?:${EVENT_KIND})(?:\s+\d{4})?)\b`,
+    'gu',
+  )
+  for (const match of text.matchAll(titled)) remember(match[1])
+
+  return markers
+}
+
+function markerCoveredByText(marker: string, text: string): boolean {
+  const haystack = text.toLocaleLowerCase()
+  const raw = marker.replace(/^#/, '').toLocaleLowerCase()
+  if (haystack.includes(raw)) return true
+  const spaced = raw.replace(/[_-]+/g, ' ')
+  if (haystack.includes(spaced)) return true
+  const compact = raw.replace(/[\s_-]+/g, '')
+  return compact.length >= 6 && haystack.replace(/[\s_-]+/g, '').includes(compact)
+}
+
+/**
+ * Truncate evidence for the prompt without dropping the most specific subject
+ * markers that bind venue/date/status facts to a named child or sub-event.
+ */
+export function truncatePreservingSubjectScope(text: string, maxLen: number): string {
+  if (typeof text !== 'string') return ''
+  if (!Number.isFinite(maxLen) || maxLen < 32) return text
+  if (text.length <= maxLen) return text
+
+  const markers = extractSubjectScopeMarkers(text)
+  const headProbe = text.slice(0, maxLen)
+  const missing = markers.filter((marker) => !markerCoveredByText(marker, headProbe))
+  if (!missing.length) return `${text.slice(0, maxLen)}…`
+
+  const suffix = `\n[Subject scope from source: ${missing.join(' | ')}]`
+  const budget = Math.max(24, maxLen - suffix.length - 1)
+  return `${text.slice(0, budget)}…${suffix}`
+}
+
+/**
+ * Reusable Event AI Engine instruction: never broaden a child/sub-event fact to
+ * the parent festival unless the evidence explicitly states that broader scope.
+ */
+export function buildSubjectScopeGuidance(): string {
+  return [
+    'SUBJECT SCOPE: A factual attribute or change (venue, date, status, fee, registration, cancellation) belongs to the most specific supported subject in the evidence.',
+    'If evidence names a child or sub-event (camp, concert, parade, competition, pageant, booth, workshop, or similarly specific titled event), keep that subject in the answer.',
+    'Do not promote a sub-event fact into a festival-wide claim unless the evidence explicitly states the whole festival changed.',
+    'When subject scope is uncertain, keep the narrower wording or say the evidence does not clearly identify festival-wide scope.',
+    'Summarize freely, but never broaden the factual subject beyond the evidence.',
+  ].join(' ')
+}
+
+/**
+ * Deterministic scope check for regression tests: true when the answer asserts a
+ * parent-festival-wide attribute change while evidence only supports a more
+ * specific named child/sub-event subject.
+ */
+export function doesAnswerBroadenSubjectScope(
+  answer: string,
+  evidence: string,
+  parentFestivalName: string,
+): boolean {
+  if (typeof answer !== 'string' || typeof evidence !== 'string' || typeof parentFestivalName !== 'string') {
+    return false
+  }
+  const parent = parentFestivalName.trim()
+  if (!parent) return false
+
+  const evidenceMarkers = extractSubjectScopeMarkers(evidence)
+  const childMarkers = evidenceMarkers.filter((marker) => {
+    const compact = marker.replace(/^#/, '').replace(/[\s_-]+/g, '').toLocaleLowerCase()
+    const parentCompact = parent.replace(/[\s_-]+/g, '').toLocaleLowerCase()
+    return compact.length > 0 && !parentCompact.includes(compact) && !compact.includes(parentCompact)
+  })
+  if (!childMarkers.length) return false
+
+  const answerKeepsChild = childMarkers.some((marker) => markerCoveredByText(marker, answer))
+  if (answerKeepsChild) return false
+
+  const parentPattern = parent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const festivalWideClaim = new RegExp(
+    String.raw`\b(?:${parentPattern}|the\s+festival)\b.{0,80}\b(?:venue|location|moved|relocated|transferred|nausab)\b|\b(?:venue|location)\b.{0,80}\b(?:${parentPattern}|the\s+festival)\b`,
+    'i',
+  )
+  return festivalWideClaim.test(answer)
 }

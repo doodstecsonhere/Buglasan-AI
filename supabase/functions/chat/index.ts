@@ -27,6 +27,7 @@ import {
   buildTemporaryServiceError,
   buildInclusiveDateArithmeticGuidance,
   buildSubjectScopeGuidance,
+  buildScopedFallback,
   getLexicalEvidenceTerms,
   getLightweightConversationResponse,
   truncatePreservingSubjectScope,
@@ -1189,7 +1190,8 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     if (isBroadened && hasProviderText) {
       // Reject broadened answers and force a fallback that respects evidence scope
       console.warn('Subject scope broadening detected, falling back to scoped response')
-      const fallback = ensureTrustedCitations(buildRecoverableFailureFallback(evidence, language), evidence.sources)
+      const scopedFallbackText = buildScopedFallback(evidenceText, language)
+      const fallback = ensureTrustedCitations(scopedFallbackText, evidence.sources)
       responseText = fallback.responseText
       citations = fallback.citations
       claims = fallback.claims

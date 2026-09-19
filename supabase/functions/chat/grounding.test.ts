@@ -30,6 +30,8 @@ import {
   extractSubjectScopeMarkers,
   buildSubjectScopeGuidance,
   truncatePreservingSubjectScope,
+  buildScopedFallback,
+  extractCitations,
   type GroundingSourceRecord,
 } from './grounding.ts'
 
@@ -262,4 +264,63 @@ Deno.test('grounding: workshop location change cannot become festival-wide claim
   const correctAnswer = 'The Photography Workshop 2026 will now be held at the Creative Arts Center.'
   assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, workshopEvidence, 'Summer Arts Festival'), true)
   assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, workshopEvidence, 'Summer Arts Festival'), false)
+})
+
+Deno.test('grounding: scoped fallback preserves specific subject from evidence', () => {
+  const subEventEvidence = 'Buglas Camp Fest 2026 has moved to Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026 #CampFest'
+  const scopedFallback = buildScopedFallback(subEventEvidence, 'en')
+  assertEquals(scopedFallback.includes('Buglas Camp Fest 2026'), true)
+  assertEquals(scopedFallback.includes('festival'), false)
+  assertEquals(scopedFallback.includes('Festival'), false)
+  assertEquals(scopedFallback.includes('official source below'), true)
+})
+
+Deno.test('grounding: scoped fallback falls back to generic when no child markers', () => {
+  const genericEvidence = 'The festival is scheduled for October 15-25, 2026.'
+  const scopedFallback = buildScopedFallback(genericEvidence, 'en')
+  assertEquals(scopedFallback, buildGroundedGenerationFallback('en'))
+})
+
+Deno.test('grounding: scoped fallback filters out generic festival names', () => {
+  const mixedEvidence = 'Buglasan Festival 2026 will be held in Dumaguete. Buglas Camp Fest 2026 is at Dons Magna. #BuglasCampFest2026'
+  const scopedFallback = buildScopedFallback(mixedEvidence, 'en')
+  assertEquals(scopedFallback.includes('Buglas Camp Fest 2026'), true)
+  assertEquals(scopedFallback.includes('Buglasan Festival'), false)
+})
+
+Deno.test('grounding: chat path exercises rejection → scoped fallback for broadened answer', () => {
+  // Simulate the actual chat path for subject scope validation
+  const evidenceText = 'Buglas Camp Fest 2026 has moved to Dons Magna, Dauin, Negros Oriental. #BuglasCampFest2026 #CampFest'
+  const generatedText = 'The festival location has been moved to Dons Magna, Dauin, Negros Oriental.'
+  const parentFestivalName = 'Buglasan Festival'
+
+  // Step 1: Detect broadening
+  const isBroadened = doesAnswerBroadenSubjectScope(generatedText, evidenceText, parentFestivalName)
+  assertEquals(isBroadened, true)
+
+  // Step 2: Build scoped fallback (simulating the chat path after rejection)
+  const scopedFallback = buildScopedFallback(evidenceText, 'en')
+
+  // Step 3: Verify fallback preserves specific subject
+  assertEquals(scopedFallback.includes('Buglas Camp Fest 2026'), true)
+  // Should not say "the festival" as the subject
+  assertEquals(scopedFallback.includes('the festival'), false)
+  assertEquals(scopedFallback.includes('official source below'), true)
+
+  // Step 4: Verify fallback preserves citations when processed through ensureTrustedCitations
+  const sources: GroundingSourceRecord[] = [{
+    id: 'test-source-id',
+    post_id: '1489174073247646',
+    post_url: 'https://www.facebook.com/Buglasan/posts/1489174073247646/',
+    platform: 'facebook',
+    raw_text: evidenceText,
+    normalized_text: evidenceText,
+    published_at: '2026-09-04T16:36:00+08:00',
+    festival_year: 2026,
+    is_current: true,
+    status: 'active',
+  }]
+  const withCitations = ensureTrustedCitations(scopedFallback, sources)
+  assertEquals(withCitations.citations.length, 1)
+  assertEquals(withCitations.citations[0].id, 'test-source-id')
 })
