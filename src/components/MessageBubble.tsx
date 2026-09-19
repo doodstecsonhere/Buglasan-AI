@@ -50,12 +50,12 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   )
 }
 
-function warningCopy(warning: AnswerWarning): string {
+export function warningCopy(warning: AnswerWarning): string {
   switch (warning) {
     case 'STALE_SOURCE': return 'This time-sensitive answer relies on older source information. Verify the cited source for the latest update.'
     case 'STALE_CORPUS': return 'This time-sensitive answer could not be confirmed against a current knowledge base.'
     case 'MIXED_FRESHNESS': return 'Some information used for this time-sensitive answer may be older than other sources.'
-    case 'UNKNOWN_FRESHNESS': return 'The freshness of information for this time-sensitive answer could not be confirmed.'
+    case 'UNKNOWN_FRESHNESS': return 'Knowledge base records do not confirm that a newer update has not superseded this time-sensitive answer.'
     default: return ''
   }
 }

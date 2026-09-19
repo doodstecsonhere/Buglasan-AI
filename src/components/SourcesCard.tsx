@@ -23,15 +23,15 @@ export function SourcesCard({ sources }: SourcesCardProps) {
           </svg>
         </summary>
         
-        <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+        <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2 sm:p-3">
           {safeSources.map((source, index) => {
             const postUrl = trustedSourceUrl(source)
             if (!postUrl) return null
             return (
-            <div key={source.id} className="space-y-1.5 last:pb-0">
+            <div key={source.id} className="space-y-1.5 rounded-lg border border-slate-200 bg-white p-2.5 last:pb-0 sm:p-3">
               <div className="flex items-start gap-2">
                 <span className="flex-shrink-0 w-5 h-5 text-xs text-neutral-400 font-mono">{index + 1}.</span>
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <a
                     href={postUrl}
                     target="_blank"
@@ -42,20 +42,20 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                     Source {index + 1}: {source.title}
                   </a>
                   
-                  <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-neutral-500">
-                    <span className="flex items-center gap-1">
-                      <span className="px-1.5 py-0.5 bg-white border border-neutral-200 rounded text-[10px] font-medium capitalize">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] leading-5 text-neutral-500 sm:text-xs">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 font-medium capitalize">
                         {source.platform}
                       </span>
                     </span>
                     <span>{source.publishedAt instanceof Date && !Number.isNaN(source.publishedAt.getTime()) ? formatPHDate(source.publishedAt, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Publication date unknown'}</span>
                     {(['active','updated','postponed'].includes(source.status)) && (
-                      <span className="px-1.5 py-0.5 bg-fiesta-green-light text-fiesta-green-dark rounded text-[10px] font-medium">
+                      <span className="rounded bg-fiesta-green-light px-1.5 py-0.5 font-medium text-fiesta-green-dark">
                         Current
                       </span>
                     )}
                     {source.supersedesSourceId && (
-                      <span className="px-1.5 py-0.5 bg-fiesta-orange-light text-fiesta-orange-dark rounded text-[10px] font-medium">
+                      <span className="rounded bg-fiesta-orange-light px-1.5 py-0.5 font-medium text-fiesta-orange-dark">
                         Updated
                       </span>
                     )}
@@ -69,7 +69,7 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-xs text-fiesta-blue hover:text-fiesta-blue-dark underline-offset-2 hover:underline"
               >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
                 Open Source {index + 1}

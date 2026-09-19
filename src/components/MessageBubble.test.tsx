@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
-import { renderCitedContent, renderMarkdownText, renderSafeLinks } from './MessageBubble'
+import { renderCitedContent, renderMarkdownText, renderSafeLinks, warningCopy } from './MessageBubble'
 import type { SourceCitation } from '../types'
 
 describe('MessageBubble response rendering', () => {
@@ -93,5 +93,10 @@ describe('MessageBubble response rendering', () => {
 
   it('keeps a malformed URL as text', () => {
     expect(renderSafeLinks('Not a link: https://')).toBe('Not a link: https://')
+  })
+
+  it('explains freshness clearly without overstating confirmation', () => {
+    expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('Knowledge base')
+    expect(warningCopy('UNKNOWN_FRESHNESS')).toContain('newer update')
   })
 })

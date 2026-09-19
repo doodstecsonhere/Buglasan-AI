@@ -10,6 +10,8 @@ interface ChatInterfaceProps {
   messages: Message[]
   isLoading: boolean
   messagesEndRef: RefObject<HTMLDivElement | null>
+  quickQuestions?: readonly string[]
+  onSend?: (content: string) => void
 }
 
 function latestFreshnessDate(metadata: FreshnessMetadata | undefined): string | null {
@@ -22,23 +24,32 @@ function latestFreshnessDate(metadata: FreshnessMetadata | undefined): string | 
 
 function FreshnessIndicator({ metadata, isOnline }: { metadata?: FreshnessMetadata; isOnline: boolean }) {
   const date = latestFreshnessDate(metadata)
-  return <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" role="status">
+  return <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600" role="status">
     {date ? <>Knowledge base last updated {date}.</> : <>Knowledge base update time is not available.</>}
     {!isOnline && <span className="ml-1">Newer information may exist online.</span>}
   </div>
 }
 
-export function ChatInterface({ messages, isLoading, messagesEndRef, isOnline = true }: ChatInterfaceProps & { isOnline?: boolean }) {
+export function ChatInterface({ messages, isLoading, messagesEndRef, isOnline = true, quickQuestions = [], onSend }: ChatInterfaceProps & { isOnline?: boolean }) {
   const latestMetadata = [...messages].reverse().find(message => message.role === 'assistant' && message.freshness)?.freshness
   if (messages.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-icon"><img src={productConfig.branding.appIconPath} alt="" aria-hidden="true" /></div>
-        <p className="eyebrow">Ask with confidence</p>
-        <h3 className="text-2xl font-bold tracking-tight text-slate-950">Your {productConfig.identity.festivalShortName} questions,<br className="sm:hidden" /> answered with official sources.</h3>
-        <p className="mt-3 max-w-md text-sm leading-6 text-slate-500">
-          Ask about {productConfig.identity.festivalName}. I’ll look for official information and show you where each answer comes from.
-        </p>
+        <div className="empty-state-content">
+          <div className="empty-icon"><img src={productConfig.branding.appIconPath} alt="" aria-hidden="true" /></div>
+          <p className="eyebrow">Ask with confidence</p>
+          <h3 className="max-w-xl text-balance text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">Your {productConfig.identity.festivalShortName} questions, answered with official sources.</h3>
+          <p className="mt-3 max-w-lg text-sm leading-6 text-slate-500 sm:text-base">
+            Ask about {productConfig.identity.festivalName}. I’ll look for official information and show you where each answer comes from.
+          </p>
+        </div>
+        {quickQuestions.length > 0 && (
+          <div className="suggestions w-full max-w-2xl" aria-label="Common questions">
+            {quickQuestions.map(question => (
+              <button key={question} type="button" onClick={() => onSend?.(question)} disabled={!onSend} className="suggestion disabled:opacity-50">{question}</button>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
