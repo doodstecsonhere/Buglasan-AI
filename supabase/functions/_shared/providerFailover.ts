@@ -77,5 +77,13 @@ export async function generateWithFailover<T>(request: ProviderRequest, primary:
       catch (error) { throwIfAborted(options.signal); lastError = error; failures.push(failureCategory(error)); if (!isFailoverEligible(error) || attempt === maxSecondary) break; await waitForRetry(250 * 2 ** (attempt - 1), sleep, options.signal) }
     }
   }
+  // Bounded failover context for sanitized diagnostics: attempt count + per-attempt
+  // failure categories. Never carries provider messages, bodies or credentials.
+  if (lastError && typeof lastError === 'object') {
+    try {
+      (lastError as Record<string, unknown>).attemptCount = failures.length
+      ;(lastError as Record<string, unknown>).failoverFailures = failures.slice(0, 12)
+    } catch { /* frozen error objects are left untouched */ }
+  }
   throw lastError
 }

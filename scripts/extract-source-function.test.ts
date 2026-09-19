@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseModelJson, validateExtractionResult } from '../supabase/functions/_shared/extraction.ts'
 import { ProviderError, classifyHttpStatus, classifyTransport, safeProviderError } from '../supabase/functions/_shared/providerErrors.ts'
 import { extractWithFailover } from '../supabase/functions/_shared/providerExtraction.ts'
+import { describeExtractionFailure } from '../supabase/functions/_shared/extractionDiagnostics.ts'
 import type { ProviderAdapter } from '../supabase/functions/_shared/providerAdapters.ts'
 
 const code = readFileSync(new URL('../supabase/functions/extract-source/index.ts', import.meta.url), 'utf8')
@@ -94,7 +95,7 @@ describe('extract-source trust and resilience boundaries', () => {
     expect(code).toContain("'invalid_phase10_request'")
     expect(code).not.toMatch(/return response\([^\n]*error\.message/)
     expect(code).not.toMatch(/return response\([^\n]*JSON\.stringify\(error/)
-    expect(code).toContain("p_error_message: diagnostic.message")
+    expect(code).toContain("p_error_message: failure.message")
   })
   it('does not add prohibited processing paths', () => {
     expect(code).not.toMatch(/source_chunks|embedding|\bOCR\b/i)
@@ -137,7 +138,11 @@ describe('extract-source trust and resilience boundaries', () => {
   })
 
   it('keeps an exhausted transient provider failure retryable', () => {
-    expect(code).toContain('error instanceof TransientExtractionError || isFailoverEligible(error)')
+    expect(code).toContain('describeExtractionFailure(error, controller.signal.aborted, stage)')
+    expect(code).toContain("failure.retryable ? 'retryable_error' : 'permanent_error'")
+    // Behavioral guarantee lives in the shared classifier: exhausted transient
+    // provider categories remain retryable rather than collapsing to a permanent failure.
+    expect(describeExtractionFailure(new ProviderError('gemini', 'upstream_503', 'raw upstream', 503), false, 'provider').retryable).toBe(true)
   })
 
   it.each([[429, 'rate_limited'], [500, 'upstream_500'], [502, 'upstream_502'], [503, 'upstream_503'], [504, 'upstream_504']] as const)('keeps HTTP classification %s unchanged', (status, category) => expect(classifyHttpStatus(status)).toBe(category))

@@ -13,7 +13,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: false,
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.ts', 'supabase/functions/_shared/providerFailover.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.ts', 'supabase/functions/_shared/providerFailover.test.ts', 'supabase/functions/_shared/extractionDiagnostics.test.ts'],
     exclude: ['node_modules', 'dist'],
   },
 })
