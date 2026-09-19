@@ -9,6 +9,23 @@ describe('MessageBubble response rendering', () => {
     return value as ReactElement<{ children?: ReactElement<{ children?: string }> | string; href?: string; 'aria-label'?: string }>
   }
 
+  const renderedText = (nodes: unknown[]): string => nodes.map((node) => {
+    if (typeof node === 'string') return node
+    if (node && typeof node === 'object' && 'props' in node) {
+      const children = (node as { props?: { children?: unknown } }).props?.children
+      return Array.isArray(children) ? children.map(child => typeof child === 'string' ? child : '').join('') : typeof children === 'string' ? children : ''
+    }
+    return ''
+  }).join('')
+
+  const evidenceSources: SourceCitation[] = [{
+    id: 'official-source-1', postId: 'official-1', title: 'Official source one', platform: 'official',
+    postUrl: 'https://negor.gov.ph/buglasan/1', publishedAt: null, festivalYear: 2026, status: 'active',
+  }, {
+    id: 'official-source-2', postId: 'official-2', title: 'Official source two', platform: 'official',
+    postUrl: 'https://negor.gov.ph/buglasan/2', publishedAt: null, festivalYear: 2026, status: 'active',
+  }]
+
   it('renders generated Markdown emphasis without displaying its delimiters', () => {
     const rendered = renderMarkdownText('**Festival schedule**\n*Demo fixtures only.*')
 
@@ -58,18 +75,89 @@ describe('MessageBubble response rendering', () => {
     }]
 
     const rendered = renderCitedContent('The parade begins at 6:00 PM [Source 1]\n\n**Sources**\n[Source 1] _(src: official-source)_', sources)
-    const text = rendered.map(node => {
-      if (typeof node === 'string') return node
-      if (node && typeof node === 'object' && 'props' in node) {
-        const children = (node as { props?: { children?: unknown } }).props?.children
-        return Array.isArray(children) ? children.map(child => typeof child === 'string' ? child : '').join('') : typeof children === 'string' ? children : ''
-      }
-      return ''
-    }).join('')
+    const text = renderedText(rendered)
 
     expect(text).toContain('The parade begins at 6:00 PM')
     expect(text).not.toContain('**Sources**')
     expect(text).not.toContain('Official festival page')
+  })
+
+  it('drops the production 🌟 Sources bibliography when structured Evidence is present', () => {
+    const rendered = renderCitedContent(
+      'The parade starts at 4:00 PM on IG.\n\n🌟 Sources:\n[Source 1] Official source one\n[Source 2] Official source two',
+      evidenceSources,
+    )
+    const text = renderedText(rendered)
+
+    expect(text).toContain('The parade starts at 4:00 PM on IG.')
+    expect(text).not.toContain('Sources:')
+    expect(text).not.toContain('Official source one')
+    expect(text).not.toContain('Official source two')
+  })
+
+  it('drops a markdown ### Sources bibliography with entry titles and URLs', () => {
+    const rendered = renderCitedContent(
+      'Fireworks light up the harbor at midnight.\n\n### Sources\n[Source 1] Official source one https://negor.gov.ph/buglasan/1\n- [Source 2] Official source two',
+      evidenceSources,
+    )
+    const text = renderedText(rendered)
+
+    expect(text).toContain('Fireworks light up the harbor at midnight.')
+    expect(text).not.toContain('### Sources')
+    expect(text).not.toContain('Official source one')
+  })
+
+  it('drops a clearly bibliography-shaped trailing References section', () => {
+    const rendered = renderCitedContent(
+      'The parade route follows Rizal Park.\n\n📚 References:\n1. [Source 1] Official source one\n2. [Source 2] Official source two',
+      evidenceSources,
+    )
+    const text = renderedText(rendered)
+
+    expect(text).toContain('The parade route follows Rizal Park.')
+    expect(text).not.toContain('References:')
+    expect(text).not.toContain('Official source two')
+  })
+
+  it('preserves an inline [Source N] citation inside normal prose', () => {
+    const rendered = renderCitedContent('The parade starts at 4:00 PM [Source 1] near the harbor.', evidenceSources)
+    const citationLink = element(rendered[1])
+    expect(citationLink.type).toBe('a')
+    expect(citationLink.props.href).toBe('https://negor.gov.ph/buglasan/1')
+    expect(renderedText(rendered)).toContain('near the harbor.')
+  })
+
+  it('preserves an ordinary sentence that merely mentions sources', () => {
+    const content = 'Official sources announce the parade starts at 4:00 PM.'
+    expect(renderedText(renderCitedContent(content, evidenceSources))).toBe(content)
+  })
+
+  it('preserves a substantive non-bibliography Sources section', () => {
+    const content = '### Sources\nThe festival funding comes from the city budget and private sponsors.\nIt has been organized this way for years.'
+    expect(renderedText(renderCitedContent(content, evidenceSources))).toContain('The festival funding comes from the city budget and private sponsors.')
+  })
+
+  it('keeps a trailing bibliography visible when no structured Evidence exists', () => {
+    const content = 'The parade starts at 4:00 PM on IG.\n\n🌟 Sources:\n[Source 1] Official source one\n[Source 2] Official source two'
+    const text = renderedText(renderCitedContent(content, []))
+    expect(text).toContain('Sources:')
+    expect(text).toContain('Official source one')
+  })
+
+  it('still renders the structured Evidence panel with its source count', async () => {
+    const { SourcesCard } = await import('./SourcesCard')
+    const collectText = (value: unknown): string => {
+      if (typeof value === 'string' || typeof value === 'number') return String(value)
+      if (Array.isArray(value)) return value.map(collectText).join('')
+      if (value && typeof value === 'object' && 'props' in value) return collectText((value as { props?: { children?: unknown } }).props?.children)
+      return ''
+    }
+    const card = SourcesCard({ sources: evidenceSources })
+    const text = collectText(card)
+    expect(text).toMatch(/Evidence \S 2 sources/)
+    expect(text).toContain('Official source one')
+    expect(text).toContain('Official source two')
+    expect(JSON.stringify(card).replace(/\\\//g, '/')).toContain('https://negor.gov.ph/buglasan/2')
   })
 
   it('renders headings and list items without exposing raw markdown markers', () => {
