@@ -70,6 +70,7 @@
   .message-avatar { @apply h-8 w-8 shrink-0 rounded-full object-cover; }
   .user-avatar { @apply flex items-center justify-center bg-brand-blue text-[10px] font-bold text-white; }
   .eyebrow { @apply mb-2 text-xs font-black uppercase tracking-[.18em] text-brand-blue; }
+  .answer-section-heading { @apply mb-1 mt-4 text-sm font-bold leading-6 text-slate-900 first:mt-0; }
 }
 
 @media (max-width: 767px) {
@@ -87,15 +88,14 @@
   .empty-state h3 { @apply text-xl leading-6; }
   .empty-state p:last-child { @apply mt-1 text-xs leading-5; }
   .conversation-scroll.is-empty > div { @apply flex min-h-full flex-col; }
-  .conversation-scroll.is-empty .empty-state { @apply min-h-0 flex-1; }
+  /* Bias the empty state modestly upward on mobile (comfortable breathing room,
+     not hard to the top) while keeping the docked composer clear. */
+  .conversation-scroll.is-empty .empty-state { @apply min-h-0 flex-1 justify-start; padding-top: clamp(1.5rem, 12vh, 6rem); padding-bottom: 1rem; }
   .suggestions { @apply w-full gap-1.5; }
   .suggestion { @apply flex-1 basis-[160px] min-h-[44px] rounded-xl px-2 py-2 text-center text-[11px] leading-4; }
   .composer-dock { @apply py-2; }
   .composer-input { @apply min-h-10 py-2; }
   .send-button { @apply h-10 w-10; }
-  .app-shell > footer { @apply px-3 py-1.5; }
-  .app-shell > footer p:first-child { @apply text-[10px] leading-4; }
-  .app-shell > footer p:last-child { @apply hidden; }
 }
 
 @layer utilities {

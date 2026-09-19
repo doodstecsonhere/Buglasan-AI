@@ -4,6 +4,7 @@ import { formatRelativeTime } from '../utils/dateUtils'
 import { trustedSourceUrl } from '../utils/chatThreads'
 import { productConfig } from '../config/productConfig'
 import type { AnswerWarning } from '../utils/freshness'
+import { matchStandaloneSectionHeading, normalizeAnswerMarkdown } from '../utils/answerNormalization'
 
 interface MessageBubbleProps {
   message: Message
@@ -21,7 +22,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
       )}
       
       <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
-        {!isUser && message.freshness?.warning && message.freshness.warning !== 'NONE' && (
+        {!isUser && message.freshness?.warning && warningTone(message.freshness.warning) === 'warning' && (
           <div role="note" className={warningToneClass(message.freshness.warning)}>
             {warningCopy(message.freshness.warning)}
           </div>
@@ -78,16 +79,30 @@ export function warningToneClass(warning: AnswerWarning): string {
     : `${base} border-sky-100 bg-sky-50 text-sky-900`
 }
 
+// Inline citation syntax. Supports ASCII brackets ([Source 1]) and the full-width
+// 【】 brackets some models emit, plus any Unicode whitespace between tokens
+// (NBSP, thin/nap/narrow-no-break spaces, ideographic space).
+const CITE_WS = '[\\s\\u00A0\\u2000-\\u200B\\u202F\\u205F\\u3000]'
+const CITE_OPEN = '[\\u3010[]'
+const CITE_CLOSE = '[\\u3011\\]]'
+const CITATION_TOKEN_SOURCE = `${CITE_OPEN}${CITE_WS}*Source${CITE_WS}+\\d+(?:${CITE_WS}*(?:,|&|\\band\\b)${CITE_WS}*(?:${CITE_WS}*Source${CITE_WS}*)?\\d+)*${CITE_WS}*${CITE_CLOSE}`
+const CITATION_SPLIT_RE = new RegExp(`(_\\(src:\\s*[a-zA-Z0-9_-]+\\)_|${CITATION_TOKEN_SOURCE})`, 'gi')
+const CITATION_TOKEN_RE = new RegExp(`^${CITATION_TOKEN_SOURCE}$`, 'i')
+
 export function renderCitedContent(content: unknown, sources: unknown) {
   const safeSources = Array.isArray(sources) ? sources.filter((source): source is SourceCitation => !!source && typeof source === 'object' && typeof source.id === 'string' && typeof source.title === 'string') : []
   const rawContent = typeof content === 'string' && content.trim() ? content : 'Unable to display this message.'
+  // Deterministically repair known structural defects before any parsing.
+  const normalizedContent = normalizeAnswerMarkdown(rawContent)
   // Only the structured Evidence panel makes a trailing model-generated bibliography redundant.
-  const safeContent = safeSources.length > 0 ? stripTrailingSourcesSection(rawContent, safeSources) : rawContent
+  const safeContent = safeSources.length > 0 ? stripTrailingSourcesSection(normalizedContent, safeSources) : normalizedContent
   const sourceById = new Map(safeSources.map((source) => [source.id, source]))
   // A single "[Source N]" or a compound "[Source 2, Source 3]" / "[Source 2 and 3]"
-  // reference is captured whole. The group is anchored on the literal "Source"
-  // keyword so unrelated bracketed text ("[Note 1]", "[2]") is never transformed.
-  const parts = safeContent.split(/(_\(src:\s*[a-zA-Z0-9_-]+\)_|\[\s*Source\s+\d+(?:\s*(?:,|&|\band\b)\s*(?:Source\s+)?\s*\d+)*\s*\])/g)
+  // reference is captured whole, in ASCII brackets or the full-width 【】 brackets
+  // some models emit (with any Unicode whitespace inside). The group is anchored on
+  // the literal "Source" keyword so unrelated bracketed text ("[Note 1]", "[2]",
+  // "【Note 1】") is never transformed.
+  const parts = safeContent.split(CITATION_SPLIT_RE)
 
   return parts.flatMap((part, index) => {
     const idMatch = part.match(/^_\(src:\s*([a-zA-Z0-9_-]+)\)_$/)
@@ -97,8 +112,7 @@ export function renderCitedContent(content: unknown, sources: unknown) {
       return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
     }
 
-    const bracketMatch = part.match(/^\[\s*Source\s+\d+(?:\s*(?:,|&|\band\b)\s*(?:Source\s+)?\s*\d+)*\s*\]$/i)
-    if (bracketMatch) {
+    if (part && CITATION_TOKEN_RE.test(part)) {
       const resolved = (part.match(/\d+/g) ?? [])
         .map((value) => safeSources[Number(value) - 1])
         .filter((source): source is SourceCitation => !!source)
@@ -127,17 +141,30 @@ function citationAnchor(source: SourceCitation, evidence: readonly SourceCitatio
   )
 }
 
-// Deterministic trailing-bibliography parser. A trailing block is only
-// suppressed when every line of it is clearly bibliography decoration or a
-// citation entry, and at least one entry's citation marker maps onto a
-// structured Evidence source already rendered by the Evidence panel, so
-// substantive prose (even under a heading that mentions sources) and lists
-// with unrelated citations are never deleted.
+// Deterministic trailing-bibliography parser. A trailing block is suppressed when
+// every line of it is clearly bibliography decoration or a citation/list entry, and
+// either an entry's marker maps onto a structured Evidence source, or the block sits
+// under a strongly-decorated Sources heading (---, ##, ** or emoji) that is unmistakably
+// bibliography. Substantive prose (even under a heading that mentions sources) and lists
+// with unrelated or bare "Sources:" lead-ins are never deleted, and answer content before
+// the bibliography is always retained.
 const BIBLIOGRAPHY_HEADING_PATTERN = /^(?:[-*+_]{2,}|[^\w\s]*)\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:sources?|references?|citations?)\s*:?(?:\*\*|__)?\s*$/i
 const BIBLIOGRAPHY_SEPARATOR_PATTERN = /^[-*_]{3,}$/
 const BIBLIOGRAPHY_ENTRY_PATTERN = /^(?:(?:[-*+]|\d+[.)])\s*)?(?:\[\s*Source\s+\d+\s*\]|_\(src: [a-zA-Z0-9_-]+\)_|\[\d+\][^\s\]])[^\n]*(?:\s+(?:https?:\/\/|fb\.me\/)[^\s<]*)?\s*$/i
+const BIBLIOGRAPHY_LIST_ENTRY_PATTERN = /^(?:[-*+]|\d+[.)])\s+\S/
 const BIBLIOGRAPHY_TRAILING_CITATION_PATTERN = /\s(?:[-\u2013\u2014])\s+\[\s*(?:Source\s+)?\d+\s*\]\s*$/i
 const BIBLIOGRAPHY_CITATION_MARKER_PATTERN = /\[\s*(?:Source\s+)?(\d+)\s*\]|_\(src:\s*([a-zA-Z0-9_-]+)\)_/gi
+// A heading is "strong" when decorated before the sources word: a thematic rule
+// (---/***), an ATX heading (#), bold (**/__), or a leading non-word glyph (emoji).
+const STRONG_BIBLIOGRAPHY_HEADING_PATTERN = /^(?:[-*+_=~]{2,}|#{1,6}\s|\*\*|__)|^[^\w\s]/
+
+function isStrongBibliographyHeading(line: string): boolean {
+  return STRONG_BIBLIOGRAPHY_HEADING_PATTERN.test(line.trim())
+}
+
+function isBibliographyEntryLine(line: string): boolean {
+  return BIBLIOGRAPHY_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(line) || BIBLIOGRAPHY_LIST_ENTRY_PATTERN.test(line)
+}
 
 function bibliographyEntryReferencesEvidence(line: string, evidence: readonly SourceCitation[]): boolean {
   for (const marker of line.matchAll(BIBLIOGRAPHY_CITATION_MARKER_PATTERN)) {
@@ -162,7 +189,7 @@ export function stripTrailingSourcesSection(text: string, evidence: readonly Sou
   // A bibliography ends with either its heading (header-only tail) or a citation entry line.
   const lastLine = lines[lastContentIndex].trim()
   const lastIsHeading = BIBLIOGRAPHY_HEADING_PATTERN.test(lastLine)
-  const lastIsEntry = !lastIsHeading && (BIBLIOGRAPHY_ENTRY_PATTERN.test(lastLine) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(lastLine))
+  const lastIsEntry = !lastIsHeading && isBibliographyEntryLine(lastLine)
   if (!lastIsHeading && !lastIsEntry) return text.trim()
 
   // Walk up over entry lines to locate the bibliography heading.
@@ -173,14 +200,15 @@ export function stripTrailingSourcesSection(text: string, evidence: readonly Sou
     if (!line) continue
     if (BIBLIOGRAPHY_HEADING_PATTERN.test(line)) { headingIndex = index; break }
     if (BIBLIOGRAPHY_SEPARATOR_PATTERN.test(line)) continue
-    if (BIBLIOGRAPHY_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(line)) { entryCount += 1; continue }
+    if (isBibliographyEntryLine(line)) { entryCount += 1; continue }
     return text.trim()
   }
   if (headingIndex < 0 || headingIndex === 0) return text.trim()
 
-  // Safety signal: suppress only when a bibliography citation corresponds to a structured
-  // Evidence source already rendered, never for arbitrary bracketed numbers.
-  if (entryCount > 0) {
+  // Safety signal: suppress when a bibliography citation maps to a structured Evidence
+  // source, or when the block sits under an unmistakably-decorated Sources heading whose
+  // entries are all list-shaped. Bare "Sources:" lead-ins without decoration are kept.
+  if (entryCount > 0 && !isStrongBibliographyHeading(lines[headingIndex])) {
     let referencesEvidence = false
     for (let index = headingIndex + 1; index < lines.length; index += 1) {
       const line = lines[index].trim()
@@ -211,6 +239,13 @@ export function renderMarkdownText(text: string): ReactNode[] {
   while (index < lines.length) {
     const line = lines[index].trim()
     if (!line) {
+      index += 1
+      continue
+    }
+
+    const sectionHeading = matchStandaloneSectionHeading(line)
+    if (sectionHeading) {
+      output.push(<h4 key={`section-${index}`} className="answer-section-heading">{sectionHeading}</h4>)
       index += 1
       continue
     }
@@ -257,7 +292,7 @@ export function renderMarkdownText(text: string): ReactNode[] {
     }
 
     const paragraphLines: string[] = []
-    while (index < lines.length && !/^#{1,6}\s+/.test(lines[index].trim()) && !/^[-*]\s+/.test(lines[index].trim()) && !/^\d+\.\s+/.test(lines[index].trim()) && lines[index].trim() !== '') {
+    while (index < lines.length && !/^#{1,6}\s+/.test(lines[index].trim()) && !/^[-*]\s+/.test(lines[index].trim()) && !/^\d+\.\s+/.test(lines[index].trim()) && !matchStandaloneSectionHeading(lines[index].trim()) && lines[index].trim() !== '') {
       paragraphLines.push(lines[index].trim())
       index += 1
     }

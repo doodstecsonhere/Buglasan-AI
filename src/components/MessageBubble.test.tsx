@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
-import { renderCitedContent, renderMarkdownText, renderSafeLinks, warningCopy, warningTone } from './MessageBubble'
+import { renderCitedContent, renderMarkdownText, renderSafeLinks, stripTrailingSourcesSection, warningCopy, warningTone } from './MessageBubble'
 import type { SourceCitation } from '../types'
 
 describe('MessageBubble response rendering', () => {
@@ -350,5 +350,96 @@ describe('MessageBubble response rendering', () => {
       expect(renderedText(rendered)).toContain('[2, 3]')
       expect(collectAnchors(rendered)).toHaveLength(0)
     })
+  })
+
+  describe('Unicode citation variants', () => {
+    const collectLinks = (nodes: unknown[]): ReactElement<{ href?: string; 'aria-label'?: string }>[] => {
+      const found: ReactElement<{ href?: string; 'aria-label'?: string }>[] = []
+      const walk = (list: unknown[]) => {
+        for (const node of list) {
+          if (!node || typeof node !== 'object') continue
+          if (Array.isArray(node)) { walk(node); continue }
+          if (!isValidElement(node)) continue
+          const children = (node.props as { children?: unknown }).children
+          if (node.type === 'a') found.push(node as ReactElement<{ href?: string; 'aria-label'?: string }>)
+          walk(Array.isArray(children) ? children : [children])
+        }
+      }
+      walk(nodes)
+      return found
+    }
+
+    it('renders a full-width bracketed single citation as one clickable link', () => {
+      const rendered = renderCitedContent('Parade at 4 PM \u3010Source 1\u3011 today.', evidenceSources)
+      const links = collectLinks(rendered)
+      expect(links).toHaveLength(1)
+      expect(links[0].props.href).toBe('https://negor.gov.ph/buglasan/1')
+      expect(links[0].props['aria-label']).toBe('Open source: Official source one')
+      const text = renderedText(rendered)
+      expect(text).toContain('today.')
+      expect(text).not.toContain('\u3010')
+    })
+
+    it('renders a full-width compound citation as two clickable links', () => {
+      const rendered = renderCitedContent('Both stages open \u3010Source 1, Source 2\u3011.', evidenceSources)
+      expect(collectLinks(rendered).map(link => link.props.href)).toEqual(['https://negor.gov.ph/buglasan/1', 'https://negor.gov.ph/buglasan/2'])
+    })
+
+    it('parses a full-width citation containing non-breaking whitespace', () => {
+      const rendered = renderCitedContent('Info \u3010Source\u00A01\u3011 here.', evidenceSources)
+      expect(collectLinks(rendered)).toHaveLength(1)
+    })
+
+    it('leaves an unrelated full-width bracket untouched', () => {
+      const rendered = renderCitedContent('See \u3010Note 1\u3011 for details.', evidenceSources)
+      expect(collectLinks(rendered)).toHaveLength(0)
+      expect(renderedText(rendered)).toContain('\u3010Note 1\u3011')
+    })
+
+    it('drops an out-of-range number from a full-width compound reference', () => {
+      const rendered = renderCitedContent('X \u3010Source 1, Source 9\u3011.', evidenceSources)
+      const links = collectLinks(rendered)
+      expect(links).toHaveLength(1)
+      expect(links[0].props.href).toBe('https://negor.gov.ph/buglasan/1')
+    })
+  })
+
+  it('suppresses a decorated ---**Sources** bibliography with plain entries', () => {
+    const input = 'The fireworks start at 9 PM.\n---**Sources**\n1. Facebook post about the parade\n2. Facebook post about the concert'
+    expect(stripTrailingSourcesSection(input, evidenceSources)).toBe('The fireworks start at 9 PM.')
+    const text = renderedText(renderCitedContent(input, evidenceSources))
+    expect(text).toContain('The fireworks start at 9 PM.')
+    expect(text).not.toContain('Sources')
+    expect(text).not.toContain('Facebook post about the parade')
+  })
+
+  it('renders a recognized section heading as its own block instead of glued prose', () => {
+    const rendered = renderMarkdownText('The parade starts at 4 PM.\n\nWhat this means for you\n\nArrive early to get a good spot.')
+    const heading = rendered.find(node => isValidElement(node) && node.type === 'h4')
+    expect(heading).toBeTruthy()
+    expect((heading as ReactElement<{ children?: string }>).props.children).toBe('What this means for you')
+  })
+
+  it('hides Current for an undated active source but keeps a superseded label', async () => {
+    const { SourcesCard } = await import('./SourcesCard')
+    const sources = [
+      { id: 'c', postId: 'c', title: 'Dated active', platform: 'facebook', postUrl: 'https://www.facebook.com/Buglasan/posts/9', publishedAt: new Date('2026-09-18T00:00:00Z'), festivalYear: 2026, status: 'active' },
+      { id: 'd', postId: 'd', title: 'Undated active', platform: 'facebook', postUrl: 'https://www.facebook.com/Buglasan/posts/10', publishedAt: null, festivalYear: 2026, status: 'active' },
+      { id: 'e', postId: 'e', title: 'Undated superseded', platform: 'official', postUrl: 'https://negor.gov.ph/x', publishedAt: null, festivalYear: 2026, status: 'superseded' },
+    ] as unknown as SourceCitation[]
+    const json = JSON.stringify(SourcesCard({ sources }))
+    expect(json).toContain('Current')
+    expect(json).toContain('Superseded')
+    // Only the dated active source earns a "Current" chip; the undated active source stays quiet.
+    expect((json.match(/Current/g) ?? []).length).toBe(1)
+  })
+
+  it('does not render an informational freshness banner but keeps a genuine stale warning', async () => {
+    const { MessageBubble } = await import('./MessageBubble')
+    const base = { id: 'answer', role: 'assistant' as const, content: 'Answer', timestamp: new Date() }
+    const informational = JSON.stringify(MessageBubble({ message: { ...base, freshness: { warning: 'UNKNOWN_FRESHNESS' } as never }, showAvatar: false }))
+    expect(informational).not.toContain('"role":"note"')
+    const stale = JSON.stringify(MessageBubble({ message: { ...base, freshness: { warning: 'STALE_SOURCE' } as never }, showAvatar: false }))
+    expect(stale).toContain('"role":"note"')
   })
 })

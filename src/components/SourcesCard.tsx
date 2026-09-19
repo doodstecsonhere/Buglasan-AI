@@ -21,8 +21,8 @@ export function SourcesCard({ sources }: SourcesCardProps) {
 
   return (
     <div className="mt-2 animate-slide-up max-w-2xl">
-      <details className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500 transition-colors select-none hover:text-slate-700">
+      <details className="group rounded-2xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500 transition-colors select-none hover:text-slate-700">
           <svg className="h-3.5 w-3.5 flex-shrink-0 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
@@ -32,14 +32,19 @@ export function SourcesCard({ sources }: SourcesCardProps) {
           </svg>
         </summary>
 
-        <ul className="mt-1 divide-y divide-slate-100 border-t border-slate-100">
+        <ul className="mt-1 border-t border-slate-100">
           {safeSources.map((source, index) => {
             const postUrl = trustedSourceUrl(source)
             const date = publicationDate(source)
             const isCurrent = CURRENT_STATUSES.includes(source.status)
             const isSuperseded = SUPERSEDED_STATUSES.includes(source.status)
+            // "Current" only reads as useful next to a known publication date; an undated
+            // source stays quiet. "Superseded" carries meaning on its own, so it is kept
+            // even without a date.
+            const showCurrent = isCurrent && !!date
+            const showSuperseded = isSuperseded
             return (
-              <li key={source.id} className="py-2">
+              <li key={source.id} className="border-b border-slate-100 py-2 last:border-b-0">
                 <div className="flex items-baseline gap-2">
                   <span className="w-4 flex-shrink-0 text-right font-mono text-xs text-slate-400">{index + 1}</span>
                   {postUrl ? (
@@ -59,23 +64,25 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                     <span className="min-w-0 break-words text-sm font-semibold text-slate-700">{source.title}</span>
                   )}
                 </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 text-[11px] leading-4 text-slate-500">
-                  <span className="capitalize">{source.platform}</span>
-                  {date && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>{date}</span>
-                    </>
-                  )}
-                  {(isCurrent || isSuperseded) && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className={isCurrent ? 'rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700' : 'rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500'}>
-                        {isCurrent ? 'Current' : 'Superseded'}
-                      </span>
-                    </>
-                  )}
-                </div>
+                {(date || showSuperseded) && (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 text-[11px] leading-4 text-slate-500">
+                    <span className="capitalize">{source.platform}</span>
+                    {date && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{date}</span>
+                      </>
+                    )}
+                    {(showCurrent || showSuperseded) && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className={showCurrent ? 'rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700' : 'rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500'}>
+                          {showCurrent ? 'Current' : 'Superseded'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
               </li>
             )
           })}

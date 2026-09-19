@@ -24,10 +24,12 @@ function latestFreshnessDate(metadata: FreshnessMetadata | undefined): string | 
 
 function FreshnessIndicator({ metadata, isOnline }: { metadata?: FreshnessMetadata; isOnline: boolean }) {
   const date = latestFreshnessDate(metadata)
-  return <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600" role="status">
-    {date ? <>Knowledge base last updated {date}.</> : <>Knowledge base update time is not available.</>}
+  // A quiet, secondary status line rather than an alert/banner. The timestamp
+  // semantics are unchanged; only the visual weight is reduced.
+  return <p className="mb-3 px-0.5 text-xs font-medium leading-5 text-slate-400" role="status">
+    {date ? <>Knowledge updated {date}.</> : <>Knowledge base update time is not available.</>}
     {!isOnline && <span className="ml-1">Newer information may exist online.</span>}
-  </div>
+  </p>
 }
 
 export function ChatInterface({ messages, isLoading, messagesEndRef, isOnline = true, quickQuestions = [], onSend }: ChatInterfaceProps & { isOnline?: boolean }) {
