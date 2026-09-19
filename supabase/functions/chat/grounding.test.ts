@@ -233,3 +233,33 @@ Deno.test('grounding: subject scope broadening detection catches festival-wide c
   assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, subEventEvidence, 'Buglasan Festival'), true)
   assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, subEventEvidence, 'Buglasan Festival'), false)
 })
+
+Deno.test('grounding: generic child-event venue update cannot become festival-wide claim', () => {
+  const subEventEvidence = 'The City Center Jazz Workshop 2026 has moved to the Downtown Music Hall. #JazzWorkshop2026'
+  const broadenedAnswer = 'The festival venue has been moved to the Downtown Music Hall.'
+  const correctAnswer = 'The City Center Jazz Workshop 2026 has moved to the Downtown Music Hall.'
+  assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, subEventEvidence, 'City Center Festival'), true)
+  assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, subEventEvidence, 'City Center Festival'), false)
+})
+
+Deno.test('grounding: explicit festival-wide evidence allows festival-wide claims', () => {
+  const festivalWideEvidence = 'The entire Buglasan Festival 2026 venue has been relocated to Freedom Park due to capacity constraints.'
+  const festivalWideAnswer = 'The Buglasan Festival 2026 venue has been moved to Freedom Park.'
+  assertEquals(doesAnswerBroadenSubjectScope(festivalWideAnswer, festivalWideEvidence, 'Buglasan Festival'), false)
+})
+
+Deno.test('grounding: concert venue update cannot become festival-wide claim', () => {
+  const concertEvidence = 'The Opening Night Concert 2026 venue changed to Provincial Capitol Plaza. #OpeningConcert2026'
+  const broadenedAnswer = 'The festival location has been moved to Provincial Capitol Plaza.'
+  const correctAnswer = 'The Opening Night Concert 2026 venue changed to Provincial Capitol Plaza.'
+  assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, concertEvidence, 'Buglasan Festival'), true)
+  assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, concertEvidence, 'Buglasan Festival'), false)
+})
+
+Deno.test('grounding: workshop location change cannot become festival-wide claim', () => {
+  const workshopEvidence = 'The Photography Workshop 2026 will now be held at the Creative Arts Center. #PhotoWorkshop2026'
+  const broadenedAnswer = 'The festival location has been moved to the Creative Arts Center.'
+  const correctAnswer = 'The Photography Workshop 2026 will now be held at the Creative Arts Center.'
+  assertEquals(doesAnswerBroadenSubjectScope(broadenedAnswer, workshopEvidence, 'Summer Arts Festival'), true)
+  assertEquals(doesAnswerBroadenSubjectScope(correctAnswer, workshopEvidence, 'Summer Arts Festival'), false)
+})

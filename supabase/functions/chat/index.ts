@@ -26,8 +26,10 @@ import {
   buildRecoverableFailureFallback,
   buildTemporaryServiceError,
   buildInclusiveDateArithmeticGuidance,
+  buildSubjectScopeGuidance,
   getLexicalEvidenceTerms,
   getLightweightConversationResponse,
+  truncatePreservingSubjectScope,
   getOutOfScopeResponse,
   isAnnouncementQuery,
   buildNoVerifiedAnnouncementFallback,
@@ -39,6 +41,7 @@ import {
   resolveLanguage,
   shouldUseZeroEvidenceFallback,
   isValidCitationSource,
+  doesAnswerBroadenSubjectScope,
   type SupportedLanguage,
 } from './grounding.ts'
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
@@ -225,6 +228,7 @@ CORE PRINCIPLES:
 6. MULTILINGUAL: Respond in the user's language (${ragPolicy.languages.supported.map((language: { label: string }) => language.label).join(', ')}).
 7. DATE REASONING: Resolve "today", "tomorrow", "this weekend", "upcoming" in ${ragPolicy.regional.timeZone} timezone.
 8. EPISTEMIC STATUS: ${genericRagPrinciples.evidence.unknownIsNotNo ? 'UNKNOWN is not NO. Never turn missing evidence into a negative factual claim.' : ''}
+9. SUBJECT SCOPE: ${genericRagPrinciples.evidence.subjectScopePreserved ? 'Keep each fact bound to the most specific subject supported by the evidence. Never broaden a child or sub-event venue/date/status change into a festival-wide claim unless the evidence explicitly states that broader scope.' : ''}
 
 RESPONSE FORMAT:
 - Use clear, conversational tone with festival warmth
@@ -812,7 +816,7 @@ function formatSourcesForPrompt(sources: Source[]): string {
       : ''
 
     const text = s.normalized_text ?? s.raw_text ?? '[Non-text source; no extracted text available]'
-    return `[Source ${i + 1}] ${s.platform.toUpperCase()} | ${date} | FY${s.festival_year ?? 'unknown'} | ${statusTag}${supersedes}\n${text.substring(0, 600)}${text.length > 600 ? '…' : ''}`
+    return `[Source ${i + 1}] ${s.platform.toUpperCase()} | ${date} | FY${s.festival_year ?? 'unknown'} | ${statusTag}${supersedes}\n${truncatePreservingSubjectScope(text, 600)}`
   }).join('\n\n')
 }
 
@@ -820,7 +824,7 @@ function formatChunksForPrompt(chunks: ChunkResult[]): string {
   if (chunks.length === 0) return ''
   const lines = chunks.map((c, i) => {
     const sim = (c.similarity * 100).toFixed(1)
-    return `[Chunk ${i + 1}] similarity=${sim}% | source=${c.source_id.substring(0, 8)}… | status=${c.source_status}\n${c.content.substring(0, 500)}${c.content.length > 500 ? '…' : ''}`
+    return `[Chunk ${i + 1}] similarity=${sim}% | source=${c.source_id.substring(0, 8)}… | status=${c.source_status}\n${truncatePreservingSubjectScope(c.content, 500)}`
   })
   return `=== SEMANTIC CHUNKS (most relevant first) ===\n${lines.join('\n\n')}`
 }
@@ -1136,6 +1140,7 @@ Answer the user's query using ONLY the provided sources and events.
 - If no current info exists, state: "No current official information found for ${resolvedYear}."
 - Respond in ${language === 'ceb' ? 'Cebuano/Bisaya' : language === 'fil' ? 'Filipino/Tagalog' : 'English'}.
 - Be warm, helpful, and festival-appropriate.
+- ${buildSubjectScopeGuidance()}
 ${temporalContext ? '- Note: Events have been pre-filtered based on temporal expressions in the query. Reference this filtering in your answer.' : ''}
 ${isHistoricalRequest ? `- Note: The user explicitly asked for FY${resolvedYear}. If that year has no current data, say so honestly rather than substituting the current year.` : ''}
 ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it to explain what changed and when, but do not invent details about sources not in the chain.' : ''}
@@ -1173,7 +1178,27 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     const generatedText = hasProviderText
       ? providerText.trim()
       : buildRecoverableFailureFallback(evidence, language)
-    const { responseText, citations, claims } = ensureTrustedCitations(generatedText, evidence.sources)
+
+    // Deterministic subject scope validation: prevent sub-event facts from being
+    // promoted to festival-wide claims. This enforces the subject-scope invariant
+    // regardless of model behavior.
+    const evidenceText = evidence.sources.map((s) => s.normalized_text ?? s.raw_text ?? '').join('\n')
+    const parentFestivalName = ragPolicy.identity.assistantName.replace(' Assistant', '')
+    const isBroadened = doesAnswerBroadenSubjectScope(generatedText, evidenceText, parentFestivalName)
+    let { responseText, citations, claims }
+    if (isBroadened && hasProviderText) {
+      // Reject broadened answers and force a fallback that respects evidence scope
+      console.warn('Subject scope broadening detected, falling back to scoped response')
+      const fallback = ensureTrustedCitations(buildRecoverableFailureFallback(evidence, language), evidence.sources)
+      responseText = fallback.responseText
+      citations = fallback.citations
+      claims = fallback.claims
+    } else {
+      const validated = ensureTrustedCitations(generatedText, evidence.sources)
+      responseText = validated.responseText
+      citations = validated.citations
+      claims = validated.claims
+    }
 
     if (diagnostic) {
       const providerMarkerCount = [...generatedText.matchAll(/_\(src:\s*[a-zA-Z0-9_-]+\)_|\[source\s+\d+\]/gi)].length
