@@ -44,11 +44,40 @@ describe('MessageBubble response rendering', () => {
 
     const contentElement = element(content)
     const contentChildren = contentElement.props.children as unknown as unknown[]
-    expect(element(contentChildren[1]).type).toBe('strong')
+    expect(element(contentChildren[0]).type).toBe('strong')
     const citationLink = element(rendered[1])
     expect(citationLink.type).toBe('a')
     expect(citationLink.props.href).toBe(sources[0].postUrl)
     expect(citationLink.props.children).toEqual(['[', 1, ']'])
+  })
+
+  it('drops a trailing Sources bibliography before rendering inline citations', () => {
+    const sources: SourceCitation[] = [{
+      id: 'official-source', postId: 'official-1', title: 'Official festival page', platform: 'official',
+      postUrl: 'https://negor.gov.ph/buglasan', publishedAt: null, festivalYear: 2026, status: 'active',
+    }]
+
+    const rendered = renderCitedContent('The parade begins at 6:00 PM [Source 1]\n\n**Sources**\n[Source 1] _(src: official-source)_', sources)
+    const text = rendered.map(node => {
+      if (typeof node === 'string') return node
+      if (node && typeof node === 'object' && 'props' in node) {
+        const children = (node as { props?: { children?: unknown } }).props?.children
+        return Array.isArray(children) ? children.map(child => typeof child === 'string' ? child : '').join('') : typeof children === 'string' ? children : ''
+      }
+      return ''
+    }).join('')
+
+    expect(text).toContain('The parade begins at 6:00 PM')
+    expect(text).not.toContain('**Sources**')
+    expect(text).not.toContain('Official festival page')
+  })
+
+  it('renders headings and list items without exposing raw markdown markers', () => {
+    const rendered = renderMarkdownText('### Schedule\n- Opening parade\n- Food bazaar')
+    expect(rendered.some(node => isValidElement(node) && node.type === 'h3')).toBe(true)
+    expect(rendered.some(node => isValidElement(node) && node.type === 'ul')).toBe(true)
+    expect(rendered.join('')).not.toContain('###')
+    expect(rendered.join('')).not.toContain('- Opening parade')
   })
 
   it('renders no outbound link for a citation with a non-HTTPS source URL', () => {
