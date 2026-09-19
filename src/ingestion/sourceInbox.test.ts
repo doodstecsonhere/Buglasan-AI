@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { createWorker } from 'tesseract.js'
 import localEnglishData from '@tesseract.js-data/eng'
-import { analyzeSourceInbox, approveSourceInboxPreview, createOfflineTesseractImageProvider, deterministicLocalImageProvider, type MediaAnalysisProvider } from './sourceInbox'
+import { analyzeSourceInbox, approveSourceInboxPreview, createOfflineTesseractImageProvider, deterministicLocalImageProvider, type ImageAnalysisResult, type ImageEvidence, type MediaAnalysisProvider } from './sourceInbox'
 
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0])
 const input = (images = [{ name: 'poster.png', mimeType: 'image/png', bytes: png }], operatorCaption: string | null = 'Official schedule') => ({ facebookPostUrl: 'https://www.facebook.com/Buglasan/posts/123', images, operatorCaption, collectedAt: '2026-09-16T00:00:00.000Z' })
@@ -218,4 +218,118 @@ describe('local trusted image source inbox', () => {
       await worker.terminate()
     }
   }, 30_000)
+})
+
+describe('complete multi-image source ingestion', () => {
+  // A distinct valid PNG per index so byte-deduplication never collapses the bundle.
+  const pngs = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `schedule-${String(i + 1).padStart(2, '0')}.png`, mimeType: 'image/png', bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, i]) }))
+  const many = (count: number, caption: string | null = 'Full Buglasan 2026 schedule') => input(pngs(count), caption)
+
+  const analysis = (image: ImageEvidence, analyzedAt: string, ocrText: string | null = null): ImageAnalysisResult => ({ image_sha256: image.sha256, provider: 'batch-fixture', provider_version: '1', method: 'ocr', analyzed_at: analyzedAt, confidence: null, granularity: 'document', review_state: ocrText === null ? 'not_required' : 'needs_review', text_state: ocrText === null ? 'no_text' : 'text', ocr_text: ocrText, observations: [], warnings: [], failure: null })
+
+  it('accepts and processes a 13-image bundle end to end through the per-image provider', async () => {
+    const analyzeImage = vi.fn(deterministicLocalImageProvider.analyzeImage)
+    const preview = await analyzeSourceInbox(many(13), { ...deterministicLocalImageProvider, analyzeImage })
+    expect(preview.image_evidence).toHaveLength(13)
+    expect(preview.analyses).toHaveLength(13)
+    expect(preview.image_evidence.every((image) => image.validation === 'accepted')).toBe(true)
+    // 13 IN -> 13 PROCESSED: the provider is invoked once for every accepted image.
+    expect(analyzeImage).toHaveBeenCalledTimes(13)
+    expect(preview.status).toBe('ready_for_approval')
+  })
+
+  it('preserves deterministic evidence ordering across the analysis boundary', async () => {
+    const preview = await analyzeSourceInbox(many(13))
+    expect(preview.image_evidence.map((image) => image.name)).toEqual(pngs(13).map((image) => image.name))
+    expect(preview.analyses.map((analysisResult) => analysisResult.image_sha256)).toEqual(preview.image_evidence.map((image) => image.sha256))
+  })
+
+  it.each([1, 8, 9, 13, 20])('accepts and fully processes a %i-image bundle without a first-N corpus cap', async (count) => {
+    const analyzeImage = vi.fn(deterministicLocalImageProvider.analyzeImage)
+    const preview = await analyzeSourceInbox(many(count), { ...deterministicLocalImageProvider, analyzeImage })
+    expect(preview.image_evidence).toHaveLength(count)
+    expect(preview.analyses).toHaveLength(count)
+    expect(analyzeImage).toHaveBeenCalledTimes(count)
+  })
+
+  it('accepts a text-only / 0-image bundle unchanged', async () => {
+    const preview = await analyzeSourceInbox(many(0))
+    expect(preview.image_evidence).toHaveLength(0)
+    expect(preview.analyses).toHaveLength(0)
+    expect(preview.source_type).toBe('text')
+  })
+
+  it('fails loudly and names the count above the operational ceiling rather than truncating', async () => {
+    await expect(analyzeSourceInbox(many(49))).rejects.toThrow(/49 images.*exceeds the documented operational ceiling of 48/)
+  })
+
+  it('deduplicates byte-identical images at scale and processes only unique media', async () => {
+    const shared = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 200])
+    const images = [...pngs(12), { name: 'dup-a.png', mimeType: 'image/png', bytes: shared }, { name: 'dup-b.png', mimeType: 'image/png', bytes: shared }]
+    const analyzeImage = vi.fn(deterministicLocalImageProvider.analyzeImage)
+    const preview = await analyzeSourceInbox(input(images, null), { ...deterministicLocalImageProvider, analyzeImage })
+    expect(preview.image_evidence).toHaveLength(14)
+    expect(preview.image_evidence[13]).toMatchObject({ validation: 'rejected', failure: 'duplicate image bytes' })
+    // 14 evidence rows but only 13 unique images reach the provider.
+    expect(analyzeImage).toHaveBeenCalledTimes(13)
+  })
+
+  it('batches a 13-image bundle deterministically against an 8-per-request transport limit', async () => {
+    const batchSizes: number[] = []
+    const provider: MediaAnalysisProvider = {
+      id: 'batch-fixture',
+      version: '1',
+      maxImagesPerRequest: 8,
+      analyzeImage: async () => { throw new Error('per-image path must not be used') },
+      async analyzeImages(images, _bytes, analyzedAt) {
+        batchSizes.push(images.length)
+        return images.map((image) => analysis(image, analyzedAt, `text-${image.name}`))
+      },
+    }
+    const preview = await analyzeSourceInbox(many(13), provider)
+    expect(batchSizes).toEqual([8, 5])
+    expect(preview.analyses).toHaveLength(13)
+    expect(preview.analyses.map((analysisResult) => analysisResult.ocr_text)).toEqual(pngs(13).map((image) => `text-${image.name}`))
+    expect(preview.status).toBe('ready_for_approval')
+  })
+
+  it('keeps a later batch failure visible per image and never reports the source fully processed', async () => {
+    let call = 0
+    const provider: MediaAnalysisProvider = {
+      id: 'batch-fixture',
+      version: '1',
+      maxImagesPerRequest: 8,
+      analyzeImage: async () => { throw new Error('unused') },
+      async analyzeImages(images, _bytes, analyzedAt) {
+        call += 1
+        if (call === 2) throw new Error('second batch transport failure')
+        return images.map((image) => analysis(image, analyzedAt, `text-${image.name}`))
+      },
+    }
+    const preview = await analyzeSourceInbox(many(13), provider)
+    expect(preview.analyses).toHaveLength(13)
+    expect(preview.analyses.slice(0, 8).every((analysisResult) => analysisResult.failure === null)).toBe(true)
+    expect(preview.analyses.slice(8).every((analysisResult) => analysisResult.failure === 'second batch transport failure')).toBe(true)
+    expect(preview.status).toBe('ready_for_approval')
+    expect(preview.usable_content).toBe(true)
+  })
+
+  it('preserves every media provenance row and a single durable identity through the batching boundary', async () => {
+    const provider: MediaAnalysisProvider = {
+      id: 'batch-fixture',
+      version: '1',
+      maxImagesPerRequest: 8,
+      analyzeImage: async () => { throw new Error('unused') },
+      async analyzeImages(images, _bytes, analyzedAt) { return images.map((image) => analysis(image, analyzedAt)) },
+    }
+    const preview = await analyzeSourceInbox(many(13), provider)
+    const replay = await analyzeSourceInbox(many(13), provider)
+    expect(preview.replay_key).toBe(replay.replay_key)
+    // One Facebook post stays one durable source identity regardless of media count.
+    expect(preview.reference.identity).toBe('123')
+    const payload = approveSourceInboxPreview(preview, (p) => p, { confirmOcrReview: true })
+    const inbox = (payload.source_metadata as { source_inbox: { image_evidence: unknown[], analyses: unknown[] } }).source_inbox
+    expect(inbox.image_evidence).toHaveLength(13)
+    expect(inbox.analyses).toHaveLength(13)
+  })
 })

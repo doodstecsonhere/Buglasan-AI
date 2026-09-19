@@ -512,6 +512,43 @@ describe('Buglasan Live Operations — Source Updating Workflow', () => {
     }
   })
 
+  // 15. complete multi-image intake (Bundle-36-like)
+  it('15. intakes a 13-image bundle as one durable source and represents every media item', async () => {
+    const { dir, cleanup } = await createFixtureDir()
+    try {
+      const bundle = join(dir, '36')
+      await mkdir(bundle)
+      await writeFile(join(bundle, 'manifest.txt'), 'URL:\nhttps://www.facebook.com/Buglasan/posts/1501746578657062\n\nCAPTION:\nBuglasan 2026 full festival schedule')
+      for (let i = 0; i < 13; i++) {
+        await writeFile(join(bundle, `schedule-${String(i + 1).padStart(2, '0')}.png`), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, i]))
+      }
+
+      const bundles = await scanSourceBundles({ sourceRoot: dir })
+      expect(bundles[0].media.filter((m) => m.kind === 'image')).toHaveLength(13)
+      const comparison = compareCorpus(bundles, [])
+      expect(comparison.newSources).toHaveLength(1)
+
+      let capturedPayload: any = null
+      const result = await executeIntake(comparison, {
+        confirmProduction: true,
+        dispatcher: async (payload) => {
+          capturedPayload = payload
+          return { status: 'new', sourceId: 'uuid-36', postId: payload.post_id }
+        },
+        downstreamRunner: async () => ({ indexing: 'indexed', extraction: 'extracted', reconciliations: [] }),
+      })
+
+      expect(result.admitted).toHaveLength(1)
+      expect(capturedPayload.post_id).toBe('1501746578657062')
+      const imageEvidence = capturedPayload.source_metadata.source_inbox.image_evidence
+      expect(imageEvidence).toHaveLength(13)
+      expect(imageEvidence.every((image: { validation: string }) => image.validation === 'accepted')).toBe(true)
+      expect(capturedPayload.source_metadata.source_inbox.analyses).toHaveLength(13)
+    } finally {
+      await cleanup()
+    }
+  })
+
   // Identity resolution edge cases
   describe('resolveBundleIdentity', () => {
     it('resolves identity from in-bundle sidecar metadata', () => {

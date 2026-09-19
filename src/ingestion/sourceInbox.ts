@@ -6,7 +6,16 @@ import type { JsonObject, SourceIngestionPayload, SourceType } from './sourceIng
  * It deliberately holds no credentials, does no network I/O, and does not persist files.
  */
 export const SOURCE_INBOX_LIMITS = {
-  maxImages: 8,
+  // Every supported media item an operator places inside an authoritative source bundle
+  // is preserved and processed; there is no first-N corpus truncation. This is an
+  // operational resource ceiling, NOT a definition of the corpus: 48 images x the 8 MiB
+  // per-image byte ceiling matches the existing 384 MiB Source Inbox request budget. A
+  // bundle above it fails LOUDLY and names the count rather than silently dropping evidence.
+  maxImagesPerSource: 48,
+  // Genuine per-request transport batch size for a provider that accepts multiple images
+  // in one call. Providers that analyze one image at a time ignore this. Deterministic
+  // bounded batching keeps one Facebook post as one durable source for any media count.
+  maxImagesPerAnalysisRequest: 8,
   maxImageBytes: 8 * 1024 * 1024,
   maxVideos: 1,
   maxVideoBytes: 256 * 1024 * 1024,
@@ -110,7 +119,11 @@ export interface OfflineTesseractRecognizer {
 export interface MediaAnalysisProvider {
   readonly id: string
   readonly version: string
+  /** Transport limit for providers that accept multiple images in one request; ignored by per-image providers. */
+  readonly maxImagesPerRequest?: number
   analyzeImage(image: ImageEvidence, bytes: Uint8Array, analyzedAt: string): Promise<ImageAnalysisResult>
+  /** Optional multi-image transport. When present, analysis is split into deterministic batches bounded by `maxImagesPerRequest`. */
+  analyzeImages?(images: readonly ImageEvidence[], bytesList: readonly Uint8Array[], analyzedAt: string): Promise<ImageAnalysisResult[]>
   analyzeVideo?(video: VideoEvidence, bytes: Uint8Array, analyzedAt: string, onProgress?: (progress: VideoAnalysisProgress) => void): Promise<VideoAnalysisResult>
 }
 
@@ -276,9 +289,48 @@ export const deterministicLocalImageProvider: MediaAnalysisProvider = {
   },
 }
 
+/**
+ * Runs the analysis provider over every accepted image while preserving the 1:1 order of
+ * `evidence`. Rejected images retain their validation failure. A provider that accepts
+ * multiple images per request is invoked in deterministic bounded batches sized by its own
+ * transport limit, so an arbitrary number of authoritative images is processed against a
+ * fixed per-request ceiling without dropping any. A failed batch stays visible per image
+ * and never marks the whole source as processed. Per-image providers are called once per
+ * accepted image, exactly as before, so existing <=8-image behavior is unchanged.
+ */
+async function analyzeImagesInBatches(evidence: readonly ImageEvidence[], sourceImages: readonly SourceInboxImage[], provider: MediaAnalysisProvider, collectedAt: string): Promise<ImageAnalysisResult[]> {
+  const analyses: ImageAnalysisResult[] = new Array(evidence.length)
+  const accepted: { index: number, image: ImageEvidence, bytes: Uint8Array }[] = []
+  evidence.forEach((image, index) => {
+    if (image.failure !== null) analyses[index] = failedAnalysis(image, provider, collectedAt, image.failure)
+    else accepted.push({ index, image, bytes: sourceImages[index].bytes })
+  })
+  if (accepted.length === 0) return analyses
+  if (provider.analyzeImages) {
+    const requested = provider.maxImagesPerRequest ?? SOURCE_INBOX_LIMITS.maxImagesPerAnalysisRequest
+    const batchSize = Math.max(1, Math.min(requested, accepted.length))
+    for (let offset = 0; offset < accepted.length; offset += batchSize) {
+      const batch = accepted.slice(offset, offset + batchSize)
+      let results: ImageAnalysisResult[]
+      try {
+        results = await provider.analyzeImages(batch.map((item) => item.image), batch.map((item) => item.bytes), collectedAt)
+      } catch (error) {
+        results = batch.map((item) => failedAnalysis(item.image, provider, collectedAt, error instanceof Error ? error.message : 'provider error'))
+      }
+      batch.forEach((item, position) => { analyses[item.index] = results[position] ?? failedAnalysis(item.image, provider, collectedAt, 'provider returned no analysis for this image') })
+    }
+    return analyses
+  }
+  await Promise.all(accepted.map(async (item) => {
+    try { analyses[item.index] = await provider.analyzeImage(item.image, item.bytes, collectedAt) } catch (error) { analyses[item.index] = failedAnalysis(item.image, provider, collectedAt, error instanceof Error ? error.message : 'provider error') }
+  }))
+  return analyses
+}
+
 export async function analyzeSourceInbox(input: SourceInboxInput, provider: MediaAnalysisProvider = deterministicLocalImageProvider): Promise<SourceInboxPreview> {
   const postUrl = validFacebookUrl(input.facebookPostUrl)
-  if (!Array.isArray(input.images) || input.images.length > SOURCE_INBOX_LIMITS.maxImages) throw new SourceInboxValidationError(`images must contain 0 to ${SOURCE_INBOX_LIMITS.maxImages} items`)
+  if (!Array.isArray(input.images)) throw new SourceInboxValidationError('images must be an array')
+  if (input.images.length > SOURCE_INBOX_LIMITS.maxImagesPerSource) throw new SourceInboxValidationError(`source bundle contains ${input.images.length} images, which exceeds the documented operational ceiling of ${SOURCE_INBOX_LIMITS.maxImagesPerSource} per source; no media is silently dropped, split the post across additional bundles or raise the ceiling deliberately`)
   const videos = input.videos ?? []
   if (!Array.isArray(videos) || videos.length > SOURCE_INBOX_LIMITS.maxVideos) throw new SourceInboxValidationError(`videos must contain 0 to ${SOURCE_INBOX_LIMITS.maxVideos} items`)
   const caption = normalizedCaption(input.operatorCaption)
@@ -308,10 +360,7 @@ export async function analyzeSourceInbox(input: SourceInboxInput, provider: Medi
   }
   const identityHash = await sha256(postUrl)
   const replayKey = await sha256(JSON.stringify({ postUrl, caption, images: evidence.map(({ sha256: hash }) => hash), videos: videoEvidence.map(({ sha256: hash }) => hash) }))
-  const analyses = await Promise.all(evidence.map(async (image, index) => {
-    if (image.failure !== null) return failedAnalysis(image, provider, collectedAt, image.failure)
-    try { return await provider.analyzeImage(image, input.images[index].bytes, collectedAt) } catch (error) { return failedAnalysis(image, provider, collectedAt, error instanceof Error ? error.message : 'provider error') }
-  }))
+  const analyses = await analyzeImagesInBatches(evidence, input.images, provider, collectedAt)
   // A captured caption is accepted textual evidence; attached video remains provenance
   // and is not analyzed or represented as analyzed when that evidence is available.
   const videoAnalyses = caption !== null ? [] : await Promise.all(videoEvidence.map(async (video, index) => {
