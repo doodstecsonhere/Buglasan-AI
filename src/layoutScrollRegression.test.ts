@@ -74,3 +74,54 @@ describe('wide-screen desktop shell layout contract', () => {
     expect(mobileCss).toMatch(/\.history-sidebar\.is-open\s*\{[^}]*translate-x-0/)
   })
 })
+
+/**
+ * Main-pane footer axis contract.
+ *
+ * The reported defect: the disclaimer footer was a shell-level sibling of the
+ * sidebar+main row, so its centered content sat on the VIEWPORT axis while the
+ * header / hero / composer sat on the MAIN-PANE axis — a constant half-sidebar
+ * (144px) optical misalignment at every desktop width. The fix moves
+ * <AIDisclaimer /> inside <main>: the footer inherits the main-pane axis
+ * structurally, with no translateX / spacer / pixel-offset hacks, and on mobile
+ * (sidebar off-canvas) <main> is the full viewport width so the footer stays
+ * full-width exactly as before.
+ */
+describe('main-pane footer axis contract', () => {
+  it('renders the disclaimer inside <main>, below the composer dock', () => {
+    const disclaimerIndex = app.indexOf('<AIDisclaimer />')
+    const composerIndex = app.indexOf('composer-dock')
+    const mainCloseIndex = app.indexOf('</main>')
+    expect(disclaimerIndex).toBeGreaterThan(-1)
+    expect(composerIndex).toBeGreaterThan(-1)
+    expect(mainCloseIndex).toBeGreaterThan(-1)
+    // Footer must live BETWEEN the composer dock and </main> — never as a
+    // shell-level sibling after the row closes (the old viewport-axis bug).
+    expect(disclaimerIndex).toBeGreaterThan(composerIndex)
+    expect(disclaimerIndex).toBeLessThan(mainCloseIndex)
+    expect(app.slice(mainCloseIndex)).not.toContain('<AIDisclaimer />')
+  })
+
+  it('does not fake the alignment with transforms or absolute positioning', () => {
+    const footerRule = /\.app-footer\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(footerRule).not.toMatch(/transform|translateX|position:\s*absolute|margin-left/)
+    expect(app).not.toMatch(/translateX/)
+    // No hard-coded sidebar-width spacer constant leaked into the footer path.
+    expect(app).not.toMatch(/288px/)
+  })
+
+  it('keeps the footer content itself centered on a capped reading column', () => {
+    const disclaimer = readFileSync(join(here, 'components', 'AIDisclaimer.tsx'), 'utf8')
+    expect(disclaimer).toMatch(/<footer className="app-footer">/)
+    expect(disclaimer).toMatch(/mx-auto[^"]*max-w-2xl/)
+  })
+
+  it('freezes the timeline-aware suggestion plumbing on the empty state', () => {
+    // Exactly three timeline chips, sourced from the calendar helper, rendered
+    // through the shared .suggestions container — untouched by this pass.
+    expect(app).toMatch(/const quickQuestions = getFestivalQuickQuestions\(\)/)
+    expect(app).toMatch(/quickQuestions=\{quickQuestions\}/)
+    const chat = readFileSync(join(here, 'components', 'ChatInterface.tsx'), 'utf8')
+    expect(chat).toMatch(/className="suggestions w-full max-w-2xl"/)
+  })
+})

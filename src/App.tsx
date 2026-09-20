@@ -112,9 +112,15 @@ function App() {
         <div className={`conversation-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6${messages.length === 0 ? ' is-empty' : ''}`} aria-live="polite"><div className="content-rail"><ChatInterface messages={messages} isLoading={isLoading} messagesEndRef={messagesEndRef} isOnline={isOnline} quickQuestions={quickQuestions} onSend={handleSendMessage} /></div></div>
         {errorMessage && <div className="content-rail px-4 pb-2 sm:px-6"><div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"><span>{errorMessage}</span><button type="button" onClick={() => setErrorMessage(null)} className="rounded px-2 py-1 font-semibold hover:bg-red-100">Dismiss</button></div></div>}
         <div className="composer-dock"><div className="content-rail"><MessageInput inputRef={composerRef} onSend={handleSendMessage} disabled={isLoading} placeholder={`Ask about ${productConfig.identity.festivalName}...`} /></div></div>
+        {/* The disclaimer is application content, not chrome: it lives inside <main>
+           so its centered axis is the MAIN PANE's axis at every desktop width. As a
+           former shell-level sibling it centered on the viewport instead, leaving it
+           half a sidebar width left of the header / hero / composer. On mobile the
+           sidebar is off-canvas, so <main> is the full viewport width and the footer
+           stays full-width without any spacer. */}
+        <AIDisclaimer />
       </main>
     </div>
-    <AIDisclaimer />
   </div>
 }
 
