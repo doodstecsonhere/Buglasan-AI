@@ -1,38 +1,39 @@
 import { productConfig } from '../config/productConfig'
 
-// The non-affiliation notice is one configured sentence pair. Present each as its
-// own readable line on mobile (never shrunk to unreadable mono text or hidden) while
-// keeping the same material facts inline on desktop.
-const notice = productConfig.trust.nonAffiliationNotice
-const boundary = notice.indexOf('. ')
-const sourcingNotice = boundary >= 0 ? notice.slice(0, boundary + 1) : notice
-const affiliationNotice = boundary >= 0 ? notice.slice(boundary + 2).trim() : ''
+// The disclosure has to stay quiet and short. Desktop carries the full notice with the
+// configured non-affiliation sentence underneath; mobile keeps only the two facts that
+// matter there (unofficial project, AI can be wrong) so the footer never becomes a wall
+// of text above the home indicator.
+const assistantName = productConfig.identity.assistantName
+const pageLabel = productConfig.officialSource.pageLabel
+// Mobile repeats the festival name less often than it has to: the page label is shortened
+// to what it is called once the reader is already looking at this product.
+const shortPageLabel = pageLabel.replace(productConfig.identity.festivalName, '').replace(/\s+/g, ' ').trim() || pageLabel
 
 export function AIDisclaimer() {
   return (
-    <footer className="shrink-0 border-t border-neutral-200 bg-neutral-50/90 px-4 py-3 sm:px-6">
-      <div className="mx-auto flex max-w-2xl flex-col items-center gap-1 text-center">
-        <p className="text-xs leading-5 text-neutral-600 sm:text-[13px]">
-          <strong className="font-semibold">{productConfig.trust.aiDisclaimer}</strong>{' '}
-          For official confirmation, check the{' '}
-          <a
-            href={productConfig.officialSource.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-fiesta-red underline underline-offset-2 hover:text-fiesta-red-dark"
-          >
-            {productConfig.officialSource.pageLabel}
-          </a>
-          .
+    <footer className="app-footer">
+      <div className="mx-auto flex max-w-2xl flex-col items-center gap-0.5 text-center">
+        <p className="text-balance text-xs leading-5 text-neutral-600 sm:text-[13px]">
+          <span className="sm:hidden">Independent, unofficial project. </span>
+          <span className="hidden sm:inline">{assistantName} is an independent, unofficial project. </span>
+          AI can make mistakes. Check the official{' '}
+          {/* Kept unbroken so the link text can never wrap “Page.” onto a line of its own. */}
+          <span className="whitespace-nowrap">
+            <a
+              href={productConfig.officialSource.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-fiesta-red underline underline-offset-2 hover:text-fiesta-red-dark"
+            >
+              <span className="sm:hidden">{shortPageLabel}</span>
+              <span className="hidden sm:inline">{pageLabel}</span>
+            </a>
+            .
+          </span>
         </p>
-        <p className="text-[11px] leading-5 text-neutral-500 sm:text-xs">
-          <span>{sourcingNotice}</span>
-          {affiliationNotice && (
-            <span className="mt-0.5 block sm:mt-0 sm:inline">
-              <span className="hidden sm:inline"> </span>
-              Independent project · {affiliationNotice}
-            </span>
-          )}
+        <p className="hidden text-balance text-[11px] leading-5 text-neutral-500 sm:block">
+          {productConfig.trust.nonAffiliationNotice}
         </p>
       </div>
     </footer>

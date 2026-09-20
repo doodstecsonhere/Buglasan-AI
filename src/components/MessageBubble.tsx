@@ -109,19 +109,19 @@ export function renderCitedContent(content: unknown, sources: unknown) {
     if (idMatch) {
       const source = sourceById.get(idMatch[1])
       if (source) return [citationAnchor(source, safeSources, `${source.id}-${index}`)]
-      return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
+      return [<span key={`${part}-${index}`}>{renderMarkdownText(part, safeSources)}</span>]
     }
 
     if (part && CITATION_TOKEN_RE.test(part)) {
       const resolved = (part.match(/\d+/g) ?? [])
         .map((value) => safeSources[Number(value) - 1])
         .filter((source): source is SourceCitation => !!source)
-      if (resolved.length === 0) return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
+      if (resolved.length === 0) return [<span key={`${part}-${index}`}>{renderMarkdownText(part, safeSources)}</span>]
       if (resolved.length === 1) return [citationAnchor(resolved[0], safeSources, `${resolved[0].id}-${index}`)]
       return [(<span key={`compound-${index}`} className="ml-1 inline-flex align-super gap-1 text-xs font-semibold text-brand-blue">{resolved.map((source, sourceIndex) => citationAnchor(source, safeSources, `${source.id}-${index}-${sourceIndex}`, false))}</span>)]
     }
 
-    return [<span key={`${part}-${index}`}>{renderMarkdownText(part)}</span>]
+    return [<span key={`${part}-${index}`}>{renderMarkdownText(part, safeSources)}</span>]
   })
 }
 
@@ -151,7 +151,11 @@ function citationAnchor(source: SourceCitation, evidence: readonly SourceCitatio
 const BIBLIOGRAPHY_HEADING_PATTERN = /^(?:[-*+_]{2,}|[^\w\s]*)\s*(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:sources?|references?|citations?)\s*:?(?:\*\*|__)?\s*$/i
 const BIBLIOGRAPHY_SEPARATOR_PATTERN = /^[-*_]{3,}$/
 const BIBLIOGRAPHY_ENTRY_PATTERN = /^(?:(?:[-*+]|\d+[.)])\s*)?(?:\[\s*Source\s+\d+\s*\]|_\(src: [a-zA-Z0-9_-]+\)_|\[\d+\][^\s\]])[^\n]*(?:\s+(?:https?:\/\/|fb\.me\/)[^\s<]*)?\s*$/i
-const BIBLIOGRAPHY_LIST_ENTRY_PATTERN = /^(?:[-*+]|\d+[.)])\s+\S/
+const BIBLIOGRAPHY_LIST_ENTRY_PATTERN = /^(?:[-*+]|\d+[.)])[ \t]*\S/
+// Markdown-link bibliography shapes such as `-[**[1]**](url)Facebook post …`.
+const BIBLIOGRAPHY_LINK_ENTRY_PATTERN = /^(?:(?:[-*+]|\d+[.)])[ \t]*)?(?:\[\*{2}\[\s*(?:Source\s+)?\d+\s*\]\*{2}\]|\[[^\]]*\d[^\]]*\])[ \t]*\([^)]*\).*$/i
+// A leading citation marker proves a link-shaped line really is a bibliography entry.
+const LEADING_CITATION_MARKER_PATTERN = /^(?:(?:[-*+]|\d+[.)])[ \t]*)?\[\*{0,2}\[?\s*(?:Source\s+)?(\d+)\s*\]?\*{0,2}\]/i
 const BIBLIOGRAPHY_TRAILING_CITATION_PATTERN = /\s(?:[-\u2013\u2014])\s+\[\s*(?:Source\s+)?\d+\s*\]\s*$/i
 const BIBLIOGRAPHY_CITATION_MARKER_PATTERN = /\[\s*(?:Source\s+)?(\d+)\s*\]|_\(src:\s*([a-zA-Z0-9_-]+)\)_/gi
 // A heading is "strong" when decorated before the sources word: a thematic rule
@@ -163,7 +167,7 @@ function isStrongBibliographyHeading(line: string): boolean {
 }
 
 function isBibliographyEntryLine(line: string): boolean {
-  return BIBLIOGRAPHY_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(line) || BIBLIOGRAPHY_LIST_ENTRY_PATTERN.test(line)
+  return BIBLIOGRAPHY_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_LINK_ENTRY_PATTERN.test(line) || BIBLIOGRAPHY_TRAILING_CITATION_PATTERN.test(line) || BIBLIOGRAPHY_LIST_ENTRY_PATTERN.test(line)
 }
 
 function bibliographyEntryReferencesEvidence(line: string, evidence: readonly SourceCitation[]): boolean {
@@ -173,6 +177,11 @@ function bibliographyEntryReferencesEvidence(line: string, evidence: readonly So
       continue
     }
     const position = Number(marker[1]) - 1
+    if (Number.isInteger(position) && position >= 0 && position < evidence.length) return true
+  }
+  const leading = line.trim().match(LEADING_CITATION_MARKER_PATTERN)
+  if (leading) {
+    const position = Number(leading[1]) - 1
     if (Number.isInteger(position) && position >= 0 && position < evidence.length) return true
   }
   return false
@@ -218,9 +227,16 @@ export function stripTrailingSourcesSection(text: string, evidence: readonly Sou
     if (!referencesEvidence) return text.trim()
   }
 
-  // Swallow a bare separator heading directly above the bibliography boundary ("---\nSources:").
+  // Swallow a decorative rule that sits above the bibliography boundary, even when
+  // normalization pushed it onto its own line with a blank between it and the heading
+  // ("---\n\n**Sources**"). Blank lines are neutral; the walk stops at real content.
   let boundaryIndex = headingIndex
-  while (boundaryIndex - 1 >= 0 && BIBLIOGRAPHY_SEPARATOR_PATTERN.test(lines[boundaryIndex - 1].trim())) boundaryIndex -= 1
+  for (let index = headingIndex - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim()
+    if (!line) continue
+    if (BIBLIOGRAPHY_SEPARATOR_PATTERN.test(line)) { boundaryIndex = index; continue }
+    break
+  }
   if (boundaryIndex === 0) return text.trim()
 
   const kept = lines.slice(0, boundaryIndex).join('\n').trim()
@@ -228,13 +244,17 @@ export function stripTrailingSourcesSection(text: string, evidence: readonly Sou
 }
 
 /** Render the small Markdown subset generated by chat responses without parsing HTML. */
-export function renderMarkdownText(text: string): ReactNode[] {
+export function renderMarkdownText(text: string, evidence: readonly SourceCitation[] = []): ReactNode[] {
   const normalized = text.replace(/\r\n/g, '\n').trim()
   if (!normalized) return []
 
   const lines = normalized.split('\n')
   const output: ReactNode[] = []
   let index = 0
+  // The bubble renders with `whitespace-pre-wrap`, so a blank-line text node is what
+  // keeps one paragraph block visibly separated from the next after normalization
+  // pushed a glued heading or source note onto its own line.
+  let insideInlineBlock = false
 
   while (index < lines.length) {
     const line = lines[index].trim()
@@ -246,6 +266,7 @@ export function renderMarkdownText(text: string): ReactNode[] {
     const sectionHeading = matchStandaloneSectionHeading(line)
     if (sectionHeading) {
       output.push(<h4 key={`section-${index}`} className="answer-section-heading">{sectionHeading}</h4>)
+      insideInlineBlock = false
       index += 1
       continue
     }
@@ -254,7 +275,8 @@ export function renderMarkdownText(text: string): ReactNode[] {
     if (headingMatch) {
       const level = Math.min(6, Math.max(1, line.match(/^#+/)?.[0].length ?? 1))
       const HeadingTag = `h${level}` as ElementType
-      output.push(<HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(headingMatch[1])}</HeadingTag>)
+      output.push(<HeadingTag key={`heading-${index}`}>{renderInlineMarkdown(headingMatch[1], evidence)}</HeadingTag>)
+      insideInlineBlock = false
       index += 1
       continue
     }
@@ -268,10 +290,11 @@ export function renderMarkdownText(text: string): ReactNode[] {
       output.push(
         <ul key={`list-${index}`} className="list-disc pl-5">
           {items.map((item, itemIndex) => (
-            <li key={`li-${index}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+            <li key={`li-${index}-${itemIndex}`}>{renderInlineMarkdown(item, evidence)}</li>
           ))}
         </ul>
       )
+      insideInlineBlock = false
       continue
     }
 
@@ -284,10 +307,11 @@ export function renderMarkdownText(text: string): ReactNode[] {
       output.push(
         <ol key={`olist-${index}`} className="list-decimal pl-5">
           {items.map((item, itemIndex) => (
-            <li key={`ol-${index}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+            <li key={`ol-${index}-${itemIndex}`}>{renderInlineMarkdown(item, evidence)}</li>
           ))}
         </ol>
       )
+      insideInlineBlock = false
       continue
     }
 
@@ -297,18 +321,44 @@ export function renderMarkdownText(text: string): ReactNode[] {
       index += 1
     }
     const paragraphText = paragraphLines.join(' ')
-    if (paragraphText) output.push(...renderInlineMarkdown(paragraphText))
+    if (paragraphText) {
+      if (insideInlineBlock) output.push('\n\n')
+      output.push(...renderInlineMarkdown(paragraphText, evidence))
+      insideInlineBlock = true
+    }
   }
 
   return output
 }
 
-function renderInlineMarkdown(text: string): ReactNode[] {
+// Inline Markdown link syntax, including a label that carries its own bracket pair
+// (`[**[1]**](https://…)`), which is how several models emit source citations.
+const MARKDOWN_LINK_PATTERN = /^\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(([^)\s]*)\)$/
+const MARKDOWN_LINK_SPLIT = /(\[(?:[^\[\]]|\[[^\[\]]*\])*\]\([^)\s]*\)|\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*)|https?:\/\/[^\s<]+)/g
+const MARKDOWN_LINK_CITATION_LABEL = /^\*{0,2}\[\s*(?:Source\s+)?(\d+)\s*\]\*{0,2}$/i
+
+function renderInlineMarkdown(text: string, evidence: readonly SourceCitation[] = []): ReactNode[] {
   const inlineText = text.replace(/\n+/g, ' ').trim()
   if (!inlineText) return []
 
-  return inlineText.split(/(\*\*[^*]+\*\*|(?<!\*)\*[^*]+\*(?!\*)|https?:\/\/[^\s<]+)/g).map((part, index) => {
+  return inlineText.split(MARKDOWN_LINK_SPLIT).map((part, index) => {
     if (!part) return null
+    const link = part.match(MARKDOWN_LINK_PATTERN)
+    if (link) {
+      const [, label, rawUrl] = link
+      const citation = label.match(MARKDOWN_LINK_CITATION_LABEL)
+      // A citation-shaped label resolves against the structured Evidence list, so the
+      // link always points at the trusted source rather than model-written markup.
+      if (citation) {
+        const source = evidence[Number(citation[1]) - 1]
+        if (source) return citationAnchor(source, evidence, `citation-link-${index}`)
+        return <span key={`citation-inert-${index}`}>{renderSafeLinks(label, `citation-inert-${index}`)}</span>
+      }
+      if (isSafeHttpUrl(rawUrl)) {
+        return <a key={`link-${index}`} href={rawUrl} target="_blank" rel="noopener noreferrer" className="text-brand-blue underline underline-offset-2 hover:text-blue-800">{renderSafeLinks(label, `link-label-${index}`)}</a>
+      }
+      return <span key={`link-inert-${index}`}>{renderSafeLinks(label, `link-inert-${index}`)}</span>
+    }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={`bold-${index}`}>{renderSafeLinks(part.slice(2, -2), `bold-${index}`)}</strong>
     }

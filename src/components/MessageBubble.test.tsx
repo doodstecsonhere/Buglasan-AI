@@ -176,6 +176,31 @@ describe('MessageBubble response rendering', () => {
     expect(text).not.toContain('[3]')
   })
 
+  it('suppresses a fully collapsed production Markdown bibliography and maps its citation link to Evidence', () => {
+    const sources: SourceCitation[] = [{
+      id: 'fb-1011', postId: '1011', title: 'Buglasan Festival 2026 announcement', platform: 'facebook',
+      postUrl: 'https://www.facebook.com/Buglasan/posts/1011', publishedAt: new Date('2026-09-18T00:00:00Z'), festivalYear: 2026, status: 'active',
+    }]
+    // Emitted with no boundary whitespace at all: heading glued to body, source note
+    // glued to a citation link, and the whole terminal bibliography collapsed onto one line.
+    const input = '**Buglasan Festival 2026 - End Date**The 2026 Buglasan Festival runs from **October 15 - October 25, 2026**. 🎉\n\nThe closing ceremony is scheduled for October 25.*Source: Official Buglasan Festival Facebook Page*[**[1]**](https://www.facebook.com/Buglasan/posts/1011)\n---**Sources** -[**[1]**](https://www.facebook.com/Buglasan/posts/1011)Facebook post, 18 Sep 2026'
+    const rendered = renderCitedContent(input, sources)
+    const text = renderedText(rendered)
+
+    // Answer content survives; the terminal bibliography is gone.
+    expect(text).toContain('The 2026 Buglasan Festival runs from')
+    expect(text).toContain('The closing ceremony is scheduled for October 25.')
+    expect(text).not.toContain('Facebook post, 18 Sep 2026')
+    expect(text).not.toContain('**Sources**')
+    // The decorative rule that introduced the bibliography is swallowed with it, even
+    // after normalization pushed it onto its own line above the heading.
+    expect(text).not.toContain('---')
+    // The inline [**[1]**] citation link resolves to the trusted Evidence URL, not raw markup.
+    const hrefs = JSON.stringify(rendered).replace(/\\\//g, '/')
+    expect(hrefs).toContain('https://www.facebook.com/Buglasan/posts/1011')
+    expect(text).not.toContain('](')
+  })
+
   it('drops a markdown Citations bibliography and keeps preceding answer bytes intact', async () => {
     const { stripTrailingSourcesSection } = await import('./MessageBubble')
     const input = 'The harbor lights stay on until midnight.\n### Citations\n[Source 1] Official source one\n[Source 2] Official source two'
@@ -231,8 +256,9 @@ describe('MessageBubble response rendering', () => {
     // Known publication date rendered; unknown date omitted without an alarm label.
     expect(json).toContain('2026')
     expect(json).not.toMatch(/Publication date unknown/i)
-    // Meaningful current / superseded states still surfaced.
-    expect(json).toContain('Current')
+    // "Current" is never a claim the interface makes; "Superseded" states a fact
+    // about the source itself, so it stays.
+    expect(json).not.toContain('Current')
     expect(json).toContain('Superseded')
   })
 
@@ -420,7 +446,7 @@ describe('MessageBubble response rendering', () => {
     expect((heading as ReactElement<{ children?: string }>).props.children).toBe('What this means for you')
   })
 
-  it('hides Current for an undated active source but keeps a superseded label', async () => {
+  it('never shows a Current label, for dated or undated sources, but keeps superseded ones', async () => {
     const { SourcesCard } = await import('./SourcesCard')
     const sources = [
       { id: 'c', postId: 'c', title: 'Dated active', platform: 'facebook', postUrl: 'https://www.facebook.com/Buglasan/posts/9', publishedAt: new Date('2026-09-18T00:00:00Z'), festivalYear: 2026, status: 'active' },
@@ -428,10 +454,10 @@ describe('MessageBubble response rendering', () => {
       { id: 'e', postId: 'e', title: 'Undated superseded', platform: 'official', postUrl: 'https://negor.gov.ph/x', publishedAt: null, festivalYear: 2026, status: 'superseded' },
     ] as unknown as SourceCitation[]
     const json = JSON.stringify(SourcesCard({ sources }))
-    expect(json).toContain('Current')
+    expect(json).not.toContain('Current')
     expect(json).toContain('Superseded')
-    // Only the dated active source earns a "Current" chip; the undated active source stays quiet.
-    expect((json.match(/Current/g) ?? []).length).toBe(1)
+    // The dated active source stays quiet; only the genuinely superseded source is labelled.
+    expect((json.match(/Superseded/g) ?? []).length).toBe(1)
   })
 
   it('does not render an informational freshness banner but keeps a genuine stale warning', async () => {

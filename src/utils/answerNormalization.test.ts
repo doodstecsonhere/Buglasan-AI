@@ -3,8 +3,20 @@ import {
   isolateSectionHeadings,
   matchStandaloneSectionHeading,
   normalizeAnswerMarkdown,
+  separateBoldHeadingFromBody,
+  separateEmphasisBoundaries,
+  separateInlineBibliography,
   separatePunctuationFromBold,
 } from './answerNormalization'
+
+// The exact shape a production answer leaked with: every boundary whitespace was
+// missing, so the heading, source note, citations and bibliography all shared lines.
+const PRODUCTION_STYLE_BROKEN = [
+  '**Buglasan Festival 2026 - End Date**The 2026 Buglasan Festival runs from **October 15 - October 25, 2026**. \u{1F389}',
+  '',
+  'The closing ceremony is scheduled for October 25.*Source: Official Buglasan Festival Facebook Page*[**[1]**](https://www.facebook.com/Buglasan/posts/1011)',
+  '---**Sources** -[**[1]**](https://www.facebook.com/Buglasan/posts/1011)Facebook post, 18 Sep 2026',
+].join('\n')
 
 describe('answer markdown normalization', () => {
   describe('punctuation-to-bold spacing', () => {
@@ -63,5 +75,83 @@ describe('answer markdown normalization', () => {
     const output = normalizeAnswerMarkdown('tomorrow.**If** you come.**What this means for you**arrive early')
     expect(output).toContain('tomorrow. **If**')
     expect(output).toContain('**What this means for you**\n\narrive early')
+  })
+
+  describe('bold heading / body separation', () => {
+    it('pushes a bold heading glued to its body onto its own block', () => {
+      expect(separateBoldHeadingFromBody('**Buglasan Festival 2026 - End Date**The 2026 festival'))
+        .toBe('**Buglasan Festival 2026 - End Date**\n\nThe 2026 festival')
+    })
+
+    it('leaves mid-sentence emphasis alone', () => {
+      const input = 'It starts **today,** then the parade and **5** minutes of music.'
+      expect(separateBoldHeadingFromBody(input)).toBe(input)
+    })
+
+    it('is idempotent', () => {
+      const once = separateBoldHeadingFromBody('**Schedule**Opening parade')
+      expect(separateBoldHeadingFromBody(once)).toBe(once)
+    })
+  })
+
+  describe('emphasis boundary spacing', () => {
+    it('gives an italic source note its own block', () => {
+      const output = separateEmphasisBoundaries('scheduled for October 25.*Source: Official Page*')
+      expect(output).toBe('scheduled for October 25.\n\n*Source: Official Page*')
+    })
+
+    it('never leaves an italic run flush against a citation that follows', () => {
+      const output = separateEmphasisBoundaries('Note.*Remark*[Source 1]')
+      expect(output).toBe('Note.*Remark* [Source 1]')
+    })
+
+    it('leaves ordinary inline emphasis untouched', () => {
+      const input = 'A *bright* morning with [Source 2] nearby.'
+      expect(separateEmphasisBoundaries(input)).toBe(input)
+    })
+  })
+
+  describe('collapsed bibliography restoration', () => {
+    it('splits a rule, heading and entry that shared one line', () => {
+      const output = separateInlineBibliography('end of answer.---**Sources** -[**[1]**](https://x.test/1)Facebook post')
+      expect(output.split('\n')).toEqual(['end of answer.', '', '---', '', '**Sources**', '', '-[**[1]**](https://x.test/1)Facebook post'])
+    })
+
+    it('splits further entries that shared the same collapsed line', () => {
+      const output = separateInlineBibliography('**Sources** -[**[1]**](https://x.test/1)Post one -[**[2]**](https://x.test/2)Post two')
+      expect(output.split('\n').filter(Boolean)).toEqual(['**Sources**', '-[**[1]**](https://x.test/1)Post one', '-[**[2]**](https://x.test/2)Post two'])
+    })
+
+    it('never breaks an inline citation away from the sentence it supports', () => {
+      const input = 'The parade starts at 4 PM. [Source 1]\n\nMore answer prose.'
+      expect(separateInlineBibliography(input)).toBe(input)
+    })
+
+    it('leaves prose that merely mentions sources untouched', () => {
+      const input = 'The sources mention a parade on Friday.\n\nNothing else.'
+      expect(separateInlineBibliography(input)).toBe(input)
+    })
+  })
+
+  describe('production-style leaked answer', () => {
+    const output = normalizeAnswerMarkdown(PRODUCTION_STYLE_BROKEN)
+
+    it('separates the answer into readable blocks', () => {
+      expect(output).toContain('**Buglasan Festival 2026 - End Date**\n\nThe 2026 Buglasan Festival')
+      expect(output).toContain('\n\n*Source: Official Buglasan Festival Facebook Page* [**[1]**]')
+    })
+
+    it('restores the line structure the trailing bibliography needs', () => {
+      const lines = output.split('\n')
+      expect(lines).toContain('---')
+      expect(lines).toContain('**Sources**')
+      expect(lines.some((line) => /^-\[\*\*\[1\]\*\*\]\(https:\/\/www\.facebook\.com\/Buglasan\/posts\/1011\)/.test(line))).toBe(true)
+      // The answer itself survives every pass.
+      expect(output).toContain('The closing ceremony is scheduled for October 25.')
+    })
+
+    it('is idempotent', () => {
+      expect(normalizeAnswerMarkdown(output)).toBe(output)
+    })
   })
 })

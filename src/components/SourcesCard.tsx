@@ -6,7 +6,6 @@ interface SourcesCardProps {
   sources: SourceCitation[]
 }
 
-const CURRENT_STATUSES = ['active', 'updated', 'postponed']
 const SUPERSEDED_STATUSES = ['superseded', 'cancelled', 'archived']
 
 function publicationDate(source: SourceCitation): string | null {
@@ -36,13 +35,10 @@ export function SourcesCard({ sources }: SourcesCardProps) {
           {safeSources.map((source, index) => {
             const postUrl = trustedSourceUrl(source)
             const date = publicationDate(source)
-            const isCurrent = CURRENT_STATUSES.includes(source.status)
-            const isSuperseded = SUPERSEDED_STATUSES.includes(source.status)
-            // "Current" only reads as useful next to a known publication date; an undated
-            // source stays quiet. "Superseded" carries meaning on its own, so it is kept
-            // even without a date.
-            const showCurrent = isCurrent && !!date
-            const showSuperseded = isSuperseded
+            // "Current" is not shown anywhere: a live source needs no badge, and the label
+            // would read as a claim about what is happening today. "Superseded" states a
+            // fact about the source itself, so it stays, with or without a known date.
+            const showSuperseded = SUPERSEDED_STATUSES.includes(source.status)
             return (
               <li key={source.id} className="border-b border-slate-100 py-2 last:border-b-0">
                 <div className="flex items-baseline gap-2">
@@ -73,11 +69,11 @@ export function SourcesCard({ sources }: SourcesCardProps) {
                         <span>{date}</span>
                       </>
                     )}
-                    {(showCurrent || showSuperseded) && (
+                    {showSuperseded && (
                       <>
                         <span aria-hidden="true">·</span>
-                        <span className={showCurrent ? 'rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700' : 'rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500'}>
-                          {showCurrent ? 'Current' : 'Superseded'}
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500">
+                          Superseded
                         </span>
                       </>
                     )}
