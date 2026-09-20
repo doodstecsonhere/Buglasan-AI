@@ -49,6 +49,12 @@
      centered content keeps the exact same left/right boundaries as the non-scrolling
      header and composer columns at every desktop width (no half-scrollbar center drift). */
   .conversation-scroll { scrollbar-gutter: stable both-edges; }
+  /* The single shared content rail for the desktop main pane. With the outer shell now
+     consuming the viewport (no max-w-[1440px] cap), the readable column is centered by
+     this rule alone — one constant, one axis, for header / conversation / composer / error
+     / Evidence / hero. 48rem keeps a comfortable reading measure; wide-screen whitespace
+     reads as intentional rather than a tablet canvas floating inside a browser. */
+  .content-rail { margin-inline: auto; width: 100%; max-width: 48rem; }
   .app-header { @apply sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl sm:px-6; }
   .brand-mark { @apply h-9 w-9 shrink-0 rounded-xl object-cover shadow-lg shadow-blue-200; }
   .brand-name { @apply text-[11px] font-black uppercase tracking-[.2em] text-brand-blue; }
