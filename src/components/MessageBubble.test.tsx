@@ -1,6 +1,6 @@
 import { isValidElement, type ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
-import { renderCitedContent, renderMarkdownText, renderSafeLinks, stripTrailingSourcesSection, warningCopy, warningTone } from './MessageBubble'
+import { renderCitedContent, renderMarkdownText, renderSafeLinks, stripTrailingSourcesSection, stripUnresolvedCitationTokens, warningCopy, warningTone } from './MessageBubble'
 import type { SourceCitation } from '../types'
 
 describe('MessageBubble response rendering', () => {
@@ -467,5 +467,164 @@ describe('MessageBubble response rendering', () => {
     expect(informational).not.toContain('"role":"note"')
     const stale = JSON.stringify(MessageBubble({ message: { ...base, freshness: { warning: 'STALE_SOURCE' } as never }, showAvatar: false }))
     expect(stale).toContain('"role":"note"')
+  })
+
+  describe('unresolved citation tokens', () => {
+    const collectAnchors = (nodes: unknown[]): ReactElement<{ href?: string }>[] => nodes.flatMap((node) => {
+      if (!node || typeof node !== 'object') return []
+      if (Array.isArray(node)) return collectAnchors(node)
+      if (!isValidElement(node)) return []
+      const children = (node.props as { children?: unknown }).children
+      if (node.type === 'a') return [node as ReactElement<{ href?: string }>, ...collectAnchors(Array.isArray(children) ? children : [children])]
+      return collectAnchors(Array.isArray(children) ? children : [children])
+    })
+
+    it('drops a glued unresolved full-width Source token from visible prose', () => {
+      const rendered = renderCitedContent('nothing for tomorrow\u2019s date has been posted yet\u3010Source 4\u3011.', evidenceSources)
+      const text = renderedText(rendered)
+      expect(text).toContain('has been posted yet.')
+      expect(text).not.toContain('\u3010')
+      expect(text).not.toContain('Source 4')
+      expect(collectAnchors(rendered)).toHaveLength(0)
+    })
+
+    it('drops a spaced unresolved ASCII Source token without gluing neighbouring words', () => {
+      const rendered = renderCitedContent('Details [Source 9] here.', evidenceSources)
+      const text = renderedText(rendered)
+      expect(text).toBe('Details here.')
+      expect(collectAnchors(rendered)).toHaveLength(0)
+    })
+
+    it('drops an unresolved src-id marker instead of exposing the internal token', () => {
+      const rendered = renderCitedContent('See _(src: ghost-post)_ for details.', evidenceSources)
+      const text = renderedText(rendered)
+      expect(text).toContain('for details.')
+      expect(text).not.toContain('_(src:')
+      expect(text).not.toContain('ghost-post')
+    })
+
+    it('keeps the resolvable reference of a mixed compound as a clickable link', () => {
+      const rendered = renderCitedContent('Both stories \u3010Source 1, Source 4\u3011 agree.', evidenceSources)
+      const anchors = collectAnchors(rendered)
+      expect(anchors).toHaveLength(1)
+      expect(anchors[0].props.href).toBe('https://negor.gov.ph/buglasan/1')
+      const text = renderedText(rendered)
+      expect(text).toContain('agree.')
+      expect(text).not.toContain('Source 4')
+    })
+
+    it('leaves ordinary full-width bracket text untouched', () => {
+      const text = renderedText(renderCitedContent('Notes \u3010Note 1\u3011 and [2] stay visible.', evidenceSources))
+      expect(text).toContain('\u3010Note 1\u3011')
+      expect(text).toContain('[2]')
+    })
+
+    it('is deterministic and idempotent on the stripped result', () => {
+      const once = stripUnresolvedCitationTokens('yet\u3010Source 4\u3011. Fine [Source 2] here.', evidenceSources)
+      expect(once).toBe('yet. Fine [Source 2] here.')
+      expect(stripUnresolvedCitationTokens(once, evidenceSources)).toBe(once)
+    })
+  })
+
+  describe('standalone horizontal-rule separators', () => {
+    it('renders sections without visible --- rows and keeps their spacing', () => {
+      const rendered = renderMarkdownText('Hello!\n\n---\n\n### Events for tomorrow\n\nParade at 4 PM.\n\n---\n\n### Quick reminder\n\nFestival ends October 25.\n\n---\n\nSee you there.')
+      expect(renderedText(rendered)).not.toContain('---')
+      expect(rendered.filter(node => isValidElement(node) && node.type === 'h3')).toHaveLength(2)
+      const text = renderedText(rendered)
+      expect(text).toContain('Hello!')
+      expect(text).toContain('Parade at 4 PM.')
+      expect(text).toContain('Festival ends October 25.')
+      expect(text).toContain('See you there.')
+      // Two paragraphs separated only by a removed rule keep their blank-line spacing.
+      expect(rendered.some(node => node === '\n\n')).toBe(true)
+    })
+
+    it('drops *** and ___ rules and rules glued between paragraphs', () => {
+      expect(renderedText(renderMarkdownText('First.\n***\nSecond.'))).not.toContain('***')
+      expect(renderedText(renderMarkdownText('First.\n___\nThird.'))).not.toContain('___')
+      const text = renderedText(renderMarkdownText('First.\n---\nSecond.'))
+      expect(text).not.toContain('---')
+      expect(text).toContain('First.')
+      expect(text).toContain('Second.')
+    })
+
+    it('never deletes hyphens, dashes or dates inside ordinary prose', () => {
+      const prose = 'The 2026--2027 edition runs October 15-25 -- arrive early.'
+      expect(renderedText(renderMarkdownText(prose))).toBe(prose)
+      const bullet = '- October 15 -- parade starts'
+      expect(JSON.stringify(renderMarkdownText(bullet))).toContain('October 15 -- parade starts')
+    })
+  })
+
+  it('replays the broken production answer with every sludge boundary repaired', () => {
+    const deepText = (value: unknown): string => {
+      if (typeof value === 'string' || typeof value === 'number') return String(value)
+      if (Array.isArray(value)) return value.map(deepText).join('')
+      if (value && typeof value === 'object' && 'props' in value) return deepText((value as { props?: { children?: unknown } }).props?.children)
+      return ''
+    }
+    const productionSource: SourceCitation = {
+      id: 'fb-official', postId: '1001', title: 'Buglasan Festival official page', platform: 'facebook',
+      postUrl: 'https://www.facebook.com/Buglasan/posts/1001', publishedAt: new Date('2026-09-18T00:00:00Z'), festivalYear: 2026, status: 'active',
+    }
+    // Observed production-shaped answer: standalone --- separators, a glued unresolved
+    // 【Source 4】 beside a valid link-shaped [1] citation, a 【Source 4】--- rule, and a
+    // collapsed terminal bibliography behind the bottom line.
+    const productionAnswer = [
+      '**Hello! \u{1F31F}** I\u2019m happy to help you plan your Buglasan Festival fun.',
+      '',
+      '---',
+      '',
+      '### \u{1F389} Events for **tomorrow (September 21, 2026)**',
+      '',
+      'Based on the official Buglasan Festival information that\u2019s currently available for 2026, **no specific events have been announced for September 21**. The detailed schedule that\u2019s been released so far highlights the overall festival dates (October 15\u201325) and a few highlighted activities, but nothing for tomorrow\u2019s date has been posted yet [**[1]**](https://www.facebook.com/Buglasan/posts/1001)\u3010Source 4\u3011.',
+      '',
+      '**What you can do next:**',
+      '',
+      '- Keep an eye on the official Facebook page.',
+      '- Check the official schedule.',
+      '',
+      '---',
+      '',
+      '### \u{1F4C5} Quick reminder of the confirmed festival window',
+      '',
+      '- **Buglasan Festival 2026:** **October 15\u201325, 2026**',
+      '',
+      '- Theme: *\u201CDifferent Stories. One Aspiration. One Negros Oriental.\u201D*',
+      '',
+      '\u3010Source 4\u3011---',
+      '',
+      '**Bottom line:** No current official information is available for September 21, 2026.',
+      '',
+      '---',
+      '',
+      '**Sources**',
+      '- [**[1]**](https://www.facebook.com/Buglasan/posts/1001)Buglasan Festival official page',
+    ].join('\n')
+
+    const rendered = renderCitedContent(productionAnswer, [productionSource])
+    const text = deepText(rendered)
+
+    // Unresolved 【Source 4】 is invisible rather than raw, on both boundaries.
+    expect(text).not.toContain('\u3010')
+    expect(text).not.toContain('Source 4')
+    // No standalone --- separator survives; no terminal bibliography sludge leaks.
+    expect(text).not.toContain('---')
+    expect(text).not.toContain('**Sources**')
+    // The valid [1] citation stays clickable and points at the trusted Evidence URL.
+    const anchors = JSON.stringify(rendered).replace(/\\\//g, '/')
+    expect((text.match(/\[1\]/g) ?? []).length).toBe(1)
+    expect(anchors).toContain('"href":"https://www.facebook.com/Buglasan/posts/1001"')
+    // Headings stay blocks, lists stay lists.
+    expect(anchors).toContain('"type":"h3"')
+    expect((anchors.match(/"type":"ul"/g) ?? []).length).toBeGreaterThanOrEqual(2)
+    // Factual prose survives untouched.
+    expect(text).toContain('no specific events have been announced for September 21')
+    expect(text).toContain('October 15\u201325, 2026')
+    expect(text).toContain('Different Stories. One Aspiration. One Negros Oriental.')
+    expect(text).toContain('No current official information is available for September 21, 2026.')
+    // Only the one trusted anchor is linked; nothing is fabricated onto another source.
+    expect((anchors.match(/"href":/g) ?? []).length).toBe(1)
   })
 })

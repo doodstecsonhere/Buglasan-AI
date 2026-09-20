@@ -39,6 +39,8 @@ const findByClass = (value: unknown, token: string): ReactElement | null => {
   return null
 }
 
+const assistantName = productConfig.identity.assistantName
+
 describe('AIDisclaimer trust disclosure', () => {
   const output = text(AIDisclaimer())
   const tree = AIDisclaimer()
@@ -77,11 +79,14 @@ describe('AIDisclaimer trust disclosure', () => {
     expect(nowrapText.endsWith('.')).toBe(true)
   })
 
-  it('represents both material non-affiliation facts (never dropped for layout)', () => {
-    const notice = productConfig.trust.nonAffiliationNotice
-    expect(notice).toContain('Data sourced from official channels.')
-    expect(notice).toContain('Not affiliated with the Provincial Government of Negros Oriental.')
-    // Carried verbatim on the quiet desktop line; mobile collapses it into "unofficial".
-    expect(output).toContain(notice)
+  it('communicates the trust disclosure with only the primary sentence', () => {
+    // The redundant "Data sourced from official channels. Not affiliated with …"
+    // second line is no longer rendered on any breakpoint; the footer stays a
+    // single quiet disclosure.
+    expect(output).not.toContain('Data sourced from official channels.')
+    expect(output).not.toContain('Not affiliated with the Provincial Government of Negros Oriental.')
+    expect(output).not.toContain(productConfig.trust.nonAffiliationNotice)
+    // The desktop paragraph carries the full primary sentence verbatim.
+    expect(output).toContain(`${assistantName} is an independent, unofficial project. AI can make mistakes. Check the official`)
   })
 })

@@ -22,12 +22,16 @@ function latestFreshnessDate(metadata: FreshnessMetadata | undefined): string | 
   return candidates[0]?.formattedAt ?? null
 }
 
-function FreshnessIndicator({ metadata, isOnline }: { metadata?: FreshnessMetadata; isOnline: boolean }) {
+export function FreshnessIndicator({ metadata, isOnline }: { metadata?: FreshnessMetadata; isOnline: boolean }) {
   const date = latestFreshnessDate(metadata)
   // A quiet, secondary status line rather than an alert/banner. The timestamp
   // semantics are unchanged; only the visual weight is reduced.
+  // Absence of a valid knowledge-update timestamp is visually silent: the line is
+  // never replaced with an "unavailable"/"unknown" placeholder, especially while
+  // an answer is loading, and no timestamp is ever fabricated.
+  if (!date) return null
   return <p className="mb-3 px-0.5 text-xs font-medium leading-5 text-slate-400" role="status">
-    {date ? <>Knowledge updated {date}.</> : <>Knowledge base update time is not available.</>}
+    Knowledge updated {date}.
     {!isOnline && <span className="ml-1">Newer information may exist online.</span>}
   </p>
 }
