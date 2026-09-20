@@ -18,6 +18,13 @@ const RECONCILE_AFTER_EXTRACTION = Deno.env.get('RECONCILE_AFTER_EXTRACTION') ==
 const RECONCILE_EVENT_TOKEN = Deno.env.get('RECONCILE_EVENT_TOKEN') ?? ''
 const LEASE_SECONDS = 120
 const EXTRACTION_TIMEOUT_MS = 90_000
+// Bounded per-attempt provider timeout. Without it a hanging primary consumes the
+// whole EXTRACTION_TIMEOUT_MS wall and the configured secondary failover never
+// engages within budget. 25s keeps the worst-case primary schedule (3 attempts +
+// backoff ≈ 76s) plus the first secondary attempt inside the 90s wall; if the
+// wall still lands first, the abort keeps the existing retryable extraction_timeout
+// outcome unchanged.
+const PROVIDER_ATTEMPT_TIMEOUT_MS = 25_000
 const ACCEPTANCE_FIXTURE_VERSION = 'phase6-acceptance-v1'
 // Compatibility contract: the shared boundary preserves the former MAX_ATTEMPTS = 3
 // policy, transient statuses 429, 500, 502, 503, 504, error instanceof TypeError
@@ -137,7 +144,7 @@ function acceptanceFixture(postId: unknown, sourceText: string, request: Request
 
 async function callGemini(sourceText: string, signal: AbortSignal): Promise<ExtractionResult> {
   // Transport classification and bounded retry policy are implemented by the shared provider boundary.
-  const result = await extractWithFailover(sourceText, extractionPrompt(sourceText), geminiRestAdapter(GEMINI_API_KEY, GEMINI_MODEL), configuredSecondaryAdapter(), { signal, sleep: async (ms) => { if (ms) await new Promise((resolve) => setTimeout(resolve, ms)) } })
+  const result = await extractWithFailover(sourceText, extractionPrompt(sourceText), geminiRestAdapter(GEMINI_API_KEY, GEMINI_MODEL), configuredSecondaryAdapter(), { signal, attemptTimeoutMs: PROVIDER_ATTEMPT_TIMEOUT_MS, sleep: async (ms) => { if (ms) await new Promise((resolve) => setTimeout(resolve, ms)) } })
   return result.value
 }
 

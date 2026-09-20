@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { parseModelJson, validateExtractionResult } from '../supabase/functions/_shared/extraction.ts'
 import { ProviderError, classifyHttpStatus, classifyTransport, safeProviderError } from '../supabase/functions/_shared/providerErrors.ts'
 import { extractWithFailover } from '../supabase/functions/_shared/providerExtraction.ts'
@@ -154,5 +154,48 @@ describe('extract-source trust and resilience boundaries', () => {
     const result = await extractWithFailover(source, 'prompt', adapter('gemini', [new ProviderError('gemini', 'upstream_503', 'raw upstream')]), secondary, { maxPrimary: 1 })
     expect(result.value.candidates).toEqual([])
     expect(secondaryCalls).toBe(1)
+  })
+
+  it('bounds each provider attempt so a hanging primary cannot consume the whole extraction budget', () => {
+    // The 90s wall alone previously prevented secondary failover from engaging
+    // within budget (Bundle 36 production extraction_timeout, attempt 2).
+    expect(code).toContain('const PROVIDER_ATTEMPT_TIMEOUT_MS = 25_000')
+    const callGemini = code.slice(code.indexOf('async function callGemini'), code.indexOf('serve(async (request)'))
+    expect(callGemini).toContain('attemptTimeoutMs: PROVIDER_ATTEMPT_TIMEOUT_MS')
+    // The shared wall and its retryable classification remain untouched.
+    expect(code).toContain('const EXTRACTION_TIMEOUT_MS = 90_000')
+    expect(describeExtractionFailure(new Error('anything'), true, 'provider')).toMatchObject({ code: 'extraction_timeout', retryable: true })
+  })
+
+  describe('bounded-attempt recovery through the shared failover boundary', () => {
+    // queueMicrotask must stay real so promise rejection bookkeeping is not deferred.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }) })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('abandons a never-settling primary at the attempt timeout and fails over to the secondary', async () => {
+      const hangingPrimary: ProviderAdapter = { provider: 'gemini', model: 'test', generate: () => new Promise(() => {}) }
+      const secondary: ProviderAdapter = { provider: 'openai_compatible', model: 'test', generate: async () => ({ text: JSON.stringify({ candidates: [], source_summary: null }), provider: 'openai_compatible', model: 'test' }) }
+      const pending = extractWithFailover(source, 'prompt', hangingPrimary, secondary, { maxPrimary: 1, maxSecondary: 1, attemptTimeoutMs: 25_000 })
+      await vi.advanceTimersByTimeAsync(25_000)
+      const result = await pending
+      expect(result.metadata.provider).toBe('openai_compatible')
+      expect(result.value.candidates).toEqual([])
+    })
+
+    it('exhausts bounded primary hangs into a retryable provider timeout instead of relying on the wall abort', async () => {
+      const hangingPrimary: ProviderAdapter = { provider: 'gemini', model: 'test', generate: () => new Promise(() => {}) }
+      const pending = extractWithFailover(source, 'prompt', hangingPrimary, undefined, { maxPrimary: 3, maxSecondary: 2, attemptTimeoutMs: 25_000 })
+      const expectedError = pending.then(() => null, (caught: unknown) => caught)
+      // Three bounded attempt timeouts fire inside the 90s wall; without the bound
+      // this scenario could only ever end in the wall abort itself.
+      await vi.advanceTimersByTimeAsync(50_000)
+      await vi.advanceTimersByTimeAsync(25_000)
+      const error = await expectedError
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error & { category?: string }).category).toBe('timeout')
+      const failure = describeExtractionFailure(error, false, 'provider')
+      expect(failure).toMatchObject({ code: 'extraction_provider_timeout', retryable: true })
+      expect((error as Error & { failoverFailures?: string[] }).failoverFailures).toEqual(['timeout', 'timeout', 'timeout'])
+    })
   })
 })
