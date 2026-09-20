@@ -5,6 +5,7 @@ import { ChatHistoryDrawer } from './components/ChatHistoryDrawer'
 import { AIDisclaimer } from './components/AIDisclaimer'
 import type { ChatLanguage, Message } from './types'
 import { getCurrentFestivalYear } from './utils/dateUtils'
+import { getFestivalQuickQuestions } from './utils/festivalQuickQuestions'
 import { ChatRequestAbortedError, ChatResponseValidationError, chatService } from './services'
 import { addressedThreadId, createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, updateChatThreadMessages, type ChatThread } from './utils/chatThreads'
 import { readInstallDismissed, writeInstallDismissed } from './utils/installPrompt'
@@ -95,7 +96,9 @@ function App() {
   const selectThread = useCallback((id: string) => { const thread = threads.find(item => item.id === id); if (thread) { activeThreadRef.current = id; setActiveThreadId(id); setMessages(thread.messages); setHistoryOpen(false) } }, [threads])
   const deleteThread = useCallback((id: string) => { setThreads(previous => previous.filter(thread => thread.id !== id)); if (id === activeThreadId) newChat() }, [activeThreadId, newChat])
   const installApp = async () => { if (!installPrompt) return; await installPrompt.prompt(); const result = await installPrompt.userChoice; if (result.outcome === 'dismissed') { writeInstallDismissed(); setInstallDismissed(true) }; setInstallPrompt(null) }
-  const quickQuestions = productConfig.branding.quickQuestions
+  // Timeline-aware empty-state suggestions: exactly three chips chosen from the
+  // festival-local (Asia/Manila) calendar, never the static branding fallback.
+  const quickQuestions = getFestivalQuickQuestions()
   const isStandalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true)
 
   return <div className="app-shell flex min-h-[100dvh] flex-col overflow-hidden text-slate-900">
