@@ -51,19 +51,57 @@ describe('wide-screen desktop shell layout contract', () => {
     expect(app).toMatch(/<main className="flex min-h-0 min-w-0 flex-1/)
   })
 
-  it('routes header, conversation, composer and error through one shared content rail', () => {
-    expect(app).toMatch(/app-header\"><div className="content-rail/)
-    expect(app).toMatch(/aria-live="polite"><div className="content-rail"/)
-    expect(app).toMatch(/composer-dock\"><div className="content-rail"/)
-    expect(app).toMatch(/errorMessage && <div className="content-rail/)
-    // The rail constant must not be duplicated as ad-hoc max-w-3xl chains anymore.
+  it('routes header, conversation, composer and error through one shared desktop interaction rail', () => {
+    expect(app).toMatch(/app-header"><div className="desktop-interaction-rail/)
+    expect(app).toMatch(/aria-live="polite"><div className="desktop-interaction-rail"/)
+    expect(app).toMatch(/composer-dock"><div className="desktop-interaction-rail"/)
+    expect(app).toMatch(/errorMessage && <div className="desktop-interaction-rail/)
+    // The rail constants must not be duplicated as ad-hoc max-w chains anymore, and
+    // the superseded single 48rem .content-rail must not linger anywhere.
     expect(app).not.toMatch(/max-w-3xl/)
+    expect(app).not.toMatch(/content-rail/)
+    expect(css).not.toMatch(/\.content-rail\s*\{/)
   })
 
-  it('defines .content-rail once, centered, at a human reading width', () => {
-    const rail = /\.content-rail\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+  it('defines the desktop interaction rail once, centered, growing to 60–64rem on large desktops', () => {
+    const rail = /\.desktop-interaction-rail\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
     expect(rail).toMatch(/margin-inline:\s*auto/)
-    expect(rail).toMatch(/max-width:\s*48rem/)
+    expect(rail).toMatch(/width:\s*100%/)
+    // Responsive growth, not a sudden jump: intermediate step before the wide cap.
+    expect(css).toMatch(/@media\s*\(min-width:\s*1100px\)\s*\{\s*\.desktop-interaction-rail\s*\{\s*max-width:\s*56rem;?\s*\}/)
+    expect(css).toMatch(/@media\s*\(min-width:\s*1440px\)\s*\{\s*\.desktop-interaction-rail\s*\{\s*max-width:\s*64rem;?\s*\}/)
+  })
+
+  it('keeps a separate bounded reading rail at the accepted 48rem measure', () => {
+    const rail = /\.desktop-reading-rail\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(rail).toMatch(/margin-inline:\s*auto/)
+    const readingCap = /@media\s*\(min-width:\s*768px\)\s*\{\s*\.desktop-reading-rail\s*\{\s*max-width:\s*48rem;?\s*\}/.exec(css)?.[0] ?? ''
+    expect(readingCap).toMatch(/max-width:\s*48rem/)
+  })
+
+  it('sets long assistant prose on the reading rail inside the wider conversation frame', () => {
+    const bubble = readFileSync(join(here, 'components', 'MessageBubble.tsx'), 'utf8')
+    // The assistant answer card carries the reading rail; Evidence stays on the
+    // wider interaction rail so the surrounding UI breathes.
+    expect(bubble).toMatch(/desktop-reading-rail[^"]*rounded-bl-md/)
+    const sources = readFileSync(join(here, 'components', 'SourcesCard.tsx'), 'utf8')
+    expect(sources).not.toMatch(/desktop-reading-rail|max-w-/)
+  })
+
+  it('composes the desktop suggestion group as a deliberate 3-column grid', () => {
+    // Desktop gets grid columns + roomier padding; the mobile media query below
+    // re-declares the wrapping flex row so 375–412px keeps the accepted behavior.
+    const desktopSuggestions = /@media\s*\(min-width:\s*768px\)\s*\{[^}]*\.suggestions\s*\{[^}]*\}/.exec(css)?.[0] ?? ''
+    expect(desktopSuggestions).toMatch(/grid/)
+    expect(desktopSuggestions).toMatch(/grid-cols-3/)
+    const mobileQueryIndex = css.indexOf('@media (max-width: 767px)')
+    const mobileCss = css.slice(mobileQueryIndex)
+    expect(mobileCss).toMatch(/\.suggestions\s*\{[^}]*w-full[^}]*gap-1\.5/)
+    expect(mobileCss).toMatch(/\.suggestion\s*\{[^}]*basis-\[160px\]/)
+    // No ad-hoc max-width left on the JSX container — the class owns it centrally.
+    const chat = readFileSync(join(here, 'components', 'ChatInterface.tsx'), 'utf8')
+    expect(chat).toMatch(/className="suggestions w-full"/)
+    expect(chat).not.toMatch(/suggestions w-full max-w-/)
   })
 
   it('keeps the mobile off-canvas sidebar rule intact', () => {
@@ -121,7 +159,5 @@ describe('main-pane footer axis contract', () => {
     // through the shared .suggestions container — untouched by this pass.
     expect(app).toMatch(/const quickQuestions = getFestivalQuickQuestions\(\)/)
     expect(app).toMatch(/quickQuestions=\{quickQuestions\}/)
-    const chat = readFileSync(join(here, 'components', 'ChatInterface.tsx'), 'utf8')
-    expect(chat).toMatch(/className="suggestions w-full max-w-2xl"/)
   })
 })

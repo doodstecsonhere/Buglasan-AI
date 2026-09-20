@@ -50,7 +50,7 @@ export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
           {warningCopy(message.freshness.warning)}
         </div>
       )}
-      <div className="max-w-full break-words rounded-2xl rounded-bl-md border border-slate-200/80 bg-white px-4 py-3 text-sm leading-7 whitespace-pre-wrap text-neutral-900 shadow-sm">
+      <div className="desktop-reading-rail break-words rounded-2xl rounded-bl-md border border-slate-200/80 bg-white px-4 py-3 text-sm leading-7 whitespace-pre-wrap text-neutral-900 shadow-sm">
         {renderCitedContent(message.content, message.sources ?? [])}
       </div>
       <div className="mt-1 flex items-center justify-start gap-1.5 pl-1 text-[11px] text-neutral-400">

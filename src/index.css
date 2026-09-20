@@ -49,12 +49,29 @@
      centered content keeps the exact same left/right boundaries as the non-scrolling
      header and composer columns at every desktop width (no half-scrollbar center drift). */
   .conversation-scroll { scrollbar-gutter: stable both-edges; }
-  /* The single shared content rail for the desktop main pane. With the outer shell now
-     consuming the viewport (no outer 1440px max-width cap), the readable column is centered by
-     this rule alone — one constant, one axis, for header / conversation / composer / error
-     / Evidence / hero. 48rem keeps a comfortable reading measure; wide-screen whitespace
-     reads as intentional rather than a tablet canvas floating inside a browser. */
-  .content-rail { margin-inline: auto; width: 100%; max-width: 48rem; }
+  /* Two-tier desktop composition (v2). The operator rejected the single 48rem rail:
+     technically centered, but a tablet-sized island floating in a wide desktop canvas.
+     The old .content-rail is split into two centralized concepts so no random max-width
+     values scatter through JSX:
+     1) .desktop-interaction-rail — the WIDE presentation width for header, landing /
+        empty state, suggestion group, composer, error strip, and the conversation frame
+        (Evidence included). It grows with the viewport instead of jumping: 48rem on
+        small desktops, 56rem from 1100px, 64rem (~1024px) from 1440px.
+     2) .desktop-reading-rail — the answer READING width, frozen at the accepted ~48rem
+        measure, applied to long assistant prose inside the wider frame.
+     Below the md breakpoint both are inert (no max-width), so the frozen mobile layout
+     is untouched. */
+  .desktop-interaction-rail { margin-inline: auto; width: 100%; }
+  .desktop-reading-rail { margin-inline: auto; width: 100%; }
+  @media (min-width: 768px) {
+    .desktop-reading-rail { max-width: 48rem; }
+  }
+  @media (min-width: 1100px) {
+    .desktop-interaction-rail { max-width: 56rem; }
+  }
+  @media (min-width: 1440px) {
+    .desktop-interaction-rail { max-width: 64rem; }
+  }
   .app-header { @apply sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 px-4 py-3 backdrop-blur-xl sm:px-6; }
   .brand-mark { @apply h-9 w-9 shrink-0 rounded-xl object-cover shadow-lg shadow-blue-200; }
   .brand-name { @apply text-[11px] font-black uppercase tracking-[.2em] text-brand-blue; }
@@ -69,6 +86,14 @@
   .drawer-backdrop { @apply fixed inset-0 z-40 bg-slate-950/40 md:hidden; }
   .suggestions { @apply flex w-full max-w-2xl flex-wrap justify-center gap-2; }
   .suggestion { @apply inline-flex min-h-[44px] items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-400 hover:text-brand-blue sm:px-4 sm:text-sm; }
+  /* Desktop: the three timeline chips become a deliberate 3-column prompt group inside
+     the wide interaction rail — substantial, but not edge-to-edge navigation tabs. The
+     mobile media query below re-declares flex wrapping, so 375–412px keeps the exact
+     accepted wrapping behavior. */
+  @media (min-width: 768px) {
+    .suggestions { @apply grid max-w-none grid-cols-3 gap-3; }
+    .suggestion { @apply px-5 py-3.5 text-sm; min-height: 3.25rem; }
+  }
   .composer-dock { @apply shrink-0 border-t border-slate-200/80 bg-white/90 px-4 py-3 backdrop-blur-xl sm:px-6; }
   /* The footer is the last surface in the shell, so it — not the composer — owns the
      inset space below the home indicator on notched devices. */

@@ -50,7 +50,9 @@ export function ChatInterface({ messages, isLoading, messagesEndRef, isOnline = 
           </p>
         </div>
         {quickQuestions.length > 0 && (
-          <div className="suggestions w-full max-w-2xl" aria-label="Common questions">
+          // Container width is owned centrally by .suggestions (wrap row on mobile /
+          // 3-column desktop grid) — no ad-hoc max-w here. Text + logic frozen.
+          <div className="suggestions w-full" aria-label="Common questions">
             {quickQuestions.map(question => (
               <button key={question} type="button" onClick={() => onSend?.(question)} disabled={!onSend} className="suggestion disabled:opacity-50">{question}</button>
             ))}
