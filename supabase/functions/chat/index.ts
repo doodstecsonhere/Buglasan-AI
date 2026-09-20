@@ -1189,7 +1189,11 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     // regardless of model behavior.
     const evidenceText = evidence.sources.map((s) => s.normalized_text ?? s.raw_text ?? '').join('\n')
     const parentFestivalName = ragPolicy.identity.assistantName.replace(' Assistant', '')
-    let { responseText, citations, claims }
+    // Note: an initializer-less destructuring declaration is a syntax error and
+    // blocked function bundling; declare each binding explicitly instead.
+    let responseText: string
+    let citations: SourceCitation[]
+    let claims: ReturnType<typeof ensureTrustedCitations>['claims']
 
     // Temporal date-proof guard: for a relative-date query (today/tomorrow/this
     // weekend/next week), a source may support "happening on TARGET_DATE" only
