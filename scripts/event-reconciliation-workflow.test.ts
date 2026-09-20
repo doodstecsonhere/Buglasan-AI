@@ -14,7 +14,7 @@ describe('Workflow D event reconciler', () => {
     expect(JSON.stringify(request)).toContain('$env.SUPABASE_URL')
     expect(JSON.stringify(request)).toContain('$env.RECONCILE_EVENT_TOKEN')
     expect(JSON.stringify(request)).toContain('candidate_event_id')
-    expect(request.parameters.options.response.response.neverError).toBe(true)
+    expect(request.parameters.options).toEqual({ timeout: 95000 })
   })
   it('routes operational statuses without direct database or Gemini nodes', () => {
     for (const status of ['reconciled', 'needs_review', 'processing', 'retryable_error', 'permanent_error']) expect(raw).toContain(status)

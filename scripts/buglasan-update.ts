@@ -85,12 +85,12 @@ async function main(): Promise<void> {
           post_id: b.identity.postId,
           canonical_url: b.identity.canonicalUrl,
         })),
-        needs_review: comparison.needsIdentityReview.map((b) => ({
+        needs_identity_review_details: comparison.needsIdentityReview.map((b) => ({
           bundle_id: b.bundleId,
           raw_url: b.rawUrl,
           reason: b.identity.reason,
         })),
-        needs_content_review: comparison.needsReview.map((b) => ({
+        needs_content_review_details: comparison.needsReview.map((b) => ({
           bundle_id: b.bundleId,
           post_id: b.identity.postId,
           canonical_url: b.identity.canonicalUrl,

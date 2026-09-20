@@ -67,7 +67,11 @@ describe('Phase 2 deployment branding and static generation', () => {
     expect(validateDeploymentBranding(deploymentBranding)).toBe(deploymentBranding)
     expect(deploymentBranding.product).toMatchObject({ eventName: 'Buglasan Festival', officialUrl: 'https://www.facebook.com/Buglasan', avatarPath: '/icons/icon-192.png' })
     expect(deploymentBranding.assets).toMatchObject({ favicon: { publicPath: '/favicon.svg' }, appleTouchIcon: { width: 180, height: 180 } })
-    expect(readFileSync(resolve(root, 'public/favicon.svg'), 'utf8')).toContain('/brand/buglasan-ai-canonical.png')
+    // 34ad2d7 intentionally made the operator favicon standalone-safe: fully
+    // inlined vector paths with no external <image> reference. The canonical
+    // PNG remains the Open Graph / logo asset (validated by P2-T4), not a
+    // favicon dependency.
+    expect(readFileSync(resolve(root, 'public/favicon.svg'), 'utf8')).not.toContain('/brand/buglasan-ai-canonical.png')
     expect(deploymentBranding.assets.icons.map(icon => icon.purpose)).toEqual(['any', 'any', 'maskable'])
     expect(cacheOwnershipPrefix(deploymentBranding)).toBe('buglasan-ai.production.shell-')
     expect(cacheName(deploymentBranding)).toBe('buglasan-ai.production.shell-v5-offline-knowledge')
