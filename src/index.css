@@ -50,7 +50,7 @@
      header and composer columns at every desktop width (no half-scrollbar center drift). */
   .conversation-scroll { scrollbar-gutter: stable both-edges; }
   /* The single shared content rail for the desktop main pane. With the outer shell now
-     consuming the viewport (no max-w-[1440px] cap), the readable column is centered by
+     consuming the viewport (no outer 1440px max-width cap), the readable column is centered by
      this rule alone — one constant, one axis, for header / conversation / composer / error
      / Evidence / hero. 48rem keeps a comfortable reading measure; wide-screen whitespace
      reads as intentional rather than a tablet canvas floating inside a browser. */

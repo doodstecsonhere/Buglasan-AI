@@ -34,8 +34,8 @@ describe('desktop scroll layout regression', () => {
 /**
  * Wide-screen desktop shell + content-rail contract.
  *
- * The reported bug: the entire sidebar+main body was wrapped in `mx-auto
- * max-w-[1440px]`, so on viewports wider than 1440px the app body was centered with
+ * The reported bug: the entire sidebar+main body was wrapped in an `mx-auto` +
+ * 1440px max-width cap, so on viewports wider than 1440px the app body was centered with
  * exterior gutters (body gradient bleeding past hard vertical edges), the sidebar
  * looked detached, and the main content rail sat on a different axis from the
  * full-bleed Facebook strip / footer — the fix removes the outer cap so the shell
