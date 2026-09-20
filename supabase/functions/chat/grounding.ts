@@ -464,3 +464,111 @@ export function doesAnswerBroadenSubjectScope(
   )
   return festivalWideClaim.test(answer)
 }
+
+// ============================================
+// Temporal date-proof invariant (relative-date queries)
+// ============================================
+
+const MONTH_NAMES = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+]
+
+/** Calendar-date spellings that would explicitly bind an event to a single day. */
+function dateBindingVariants(date: Date): string[] {
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const day = date.getDate()
+  const monthFull = MONTH_NAMES[month]
+  const monthAbbr = monthFull.slice(0, 3)
+  const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return [...new Set([
+    `${monthFull} ${day}`,
+    `${monthAbbr} ${day}`,
+    `${monthAbbr}. ${day}`,
+    `${day} ${monthFull}`,
+    `${day} ${monthAbbr}`,
+    `${day} ${monthAbbr}.`,
+    `${month + 1}/${day}`,
+    iso,
+    `${monthFull} ${day}, ${year}`,
+    `${monthAbbr} ${day}, ${year}`,
+  ].map((variant) => variant.toLowerCase()))]
+}
+
+/**
+ * DATE PROOF, not semantic similarity: does the retrieved evidence text
+ * explicitly bind some event to a calendar date inside `[startDate, endDate]`?
+ * A date-shaped string must literally appear in the evidence; a merely
+ * topically-similar but undated source returns false. Bounded to a month so
+ * multi-day windows (weekend / next week) are covered without scanning far ahead.
+ */
+export function evidenceBindsResolvedDate(evidenceText: string, startDate: Date, endDate: Date): boolean {
+  if (typeof evidenceText !== 'string' || !evidenceText.trim()) return false
+  const haystack = evidenceText.toLowerCase().replace(/\s+/g, ' ')
+  const start = new Date(startDate)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(endDate)
+  end.setHours(0, 0, 0, 0)
+  const maxDays = 31
+  let scanned = 0
+  for (let cursor = new Date(start); cursor <= end && scanned < maxDays; cursor.setDate(cursor.getDate() + 1), scanned += 1) {
+    const variants = dateBindingVariants(new Date(cursor))
+    if (variants.some((variant) => haystack.includes(variant))) return true
+  }
+  return false
+}
+
+// An affirmative "something is on the resolved day" assertion. Both alternatives
+// REQUIRE a relative-day token (today/tonight/tomorrow/this weekend/next week)
+// adjacent to an event verb, so a festival-window statement that never names the
+// resolved day ("is scheduled for October 15-25") is deliberately NOT matched.
+const TEMPORAL_AFFIRMATIVE_EVENT_CLAIM = new RegExp(
+  [
+    String.raw`\b(?:happening|happens?|taking place|takes? place|occurs?|starts?|begins?|being held|held|scheduled|underway|going on)\b[^.!?\n]{0,24}\b(?:today|tonight|tomorrow|tmrw|this\s+weekend|next\s+weekend|this\s+week|next\s+week)\b`,
+    String.raw`\b(?:today|tonight|tomorrow|tmrw)\b[^.!?\n]{0,24}\b(?:happening|happens?|taking place|occurs?|starts?|begins?|held|scheduled|underway|going on|crowning|crowned|confers?|conferment)\b`,
+  ].join('|'),
+  'i',
+)
+
+// Explicit cautious denial that nothing is scheduled for the day; treated as NOT
+// an affirmative claim so an already-conservative answer is never overwritten.
+const TEMPORAL_DENIAL = /\b(?:no|not|none|nothing|currently\s+no|not\s+currently|no\s+verified|no\s+official|not\s+listed|not\s+scheduled|no\s+confirmed|no\s+current)\b[^.!?\n]{0,48}\b(?:events?|activities|schedul\w*|happening|listings?|confirmed|scheduled|listed|taking place|going on|occurring|underway|one|thing)\b/i
+
+/**
+ * True when the answer affirmatively states an event happens on the resolved
+ * relative date, and does not already carry a cautious "no events" denial.
+ */
+export function answerClaimsEventOnResolvedDate(answer: string): boolean {
+  if (typeof answer !== 'string' || !answer.trim()) return false
+  if (TEMPORAL_DENIAL.test(answer)) return false
+  return TEMPORAL_AFFIRMATIVE_EVENT_CLAIM.test(answer)
+}
+
+/**
+ * Conservative, evidence-bounded answer used when a relative-date query found no
+ * date proof for the resolved day. It never claims exhaustiveness — it states
+ * nothing is *currently listed in the available official sources*.
+ */
+export function buildUnprovenTemporalFallback(dateLabel: string, language: SupportedLanguage): string {
+  return {
+    en: `No Buglasan Festival events are currently listed for ${dateLabel} in the available official sources, and I can only share what those sources explicitly date. For the latest verified schedule, please check the official Buglasan Festival Facebook Page: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    ceb: `Walay kalihokan sa Buglasan Festival ang currently listed alang sa ${dateLabel} sa mga available nga opisyal nga tinubdan, ug ako lamang makigbahin sa ilang gitakda nga petsa. Alang sa labing bag-o nga beripikadong iskedyul, palihog tan-awa ang opisyal nga Buglasan Festival Facebook Page: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+    fil: `Walang kaganapan ng Buglasan Festival ang kasalukuyang nakalista para sa ${dateLabel} sa mga available na opisyal na source, at kaya ko lang ibahagi ang mga petsang maliwanag na nabanggit. Para sa pinakabagong beripikadong iskedyul, pakitingnan ang opisyal na Buglasan Festival Facebook Page: ${OFFICIAL_BUGLASAN_FACEBOOK_URL}`,
+  }[language]
+}
+
+/**
+ * Server-side wording rule for relative-date queries. Non-deterministic prompt
+ * guidance that pairs with the deterministic guard: it forbids promoting an
+ * undated, merely topically-similar source into a "happening today" claim.
+ */
+export function buildTemporalDateProofGuidance(language: SupportedLanguage): string {
+  if (language === 'fil') {
+    return 'TEMPORAL NA PATUNAY: Sabihing nangyayari sa natukoy na araw ang isang kaganapan lamang kung may record ng kaganapan o maliwanag na petsa sa source na nagbubukid dito sa petsang iyon. Ang pagkakahalap sa paksa o isang source na walang petsa ay hindi patunay; kung walang napatunayang kaganapan para sa araw, sabihing wala itong kasalukuyang nakalista sa mga available na opisyal na source.'
+  }
+  if (language === 'ceb') {
+    return 'TEMPORAL PROBA: Isulat nga nahitabo sa natudlo nga adlaw ang usa ka kalihokan lamang kung adunay record sa kalihokan o pisang petsa sa tinubdan nga nagtakdo niini niadtong adlawa. Ang pagkaparehas sa paksa o tinubdan nga walay petsa dili proba; kung wal nahidugang nga kalihokan para sa adlaw, ingna nga walay currently listed sa mga available nga opisyal nga tinubdan.'
+  }
+  return 'TEMPORAL DATE PROOF: Only state that an event happens on the resolved date when a FESTIVAL EVENTS entry or an explicit calendar date in the sources binds it to that date. Semantic similarity or an undated mention is not proof; if no event is proven for the date, say none are currently listed for that date in the available official sources rather than inventing one.'
+}

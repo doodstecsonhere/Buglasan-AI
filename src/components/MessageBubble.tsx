@@ -14,39 +14,48 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const timeString = message.timestamp instanceof Date && !Number.isNaN(message.timestamp.getTime()) ? formatRelativeTime(message.timestamp) : 'just now'
-  
-  return (
-    <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && showAvatar && (
-        <img className="message-avatar" src={productConfig.branding.assistantAvatarPath} alt={productConfig.branding.assistantAvatarAlt} />
-      )}
-      
-      <div className={`max-w-[80%] ${isUser ? 'order-2' : 'order-1'}`}>
-        {!isUser && message.freshness?.warning && warningTone(message.freshness.warning) === 'warning' && (
-          <div role="note" className={warningToneClass(message.freshness.warning)}>
-            {warningCopy(message.freshness.warning)}
+
+  // User turns stay a right-aligned bubble within the main content column.
+  if (isUser) {
+    return (
+      <div className="flex gap-3 justify-end">
+        <div className="max-w-[80%]">
+          <div className="max-w-full break-words rounded-2xl rounded-br-md bg-brand-blue px-4 py-3 text-sm leading-7 whitespace-pre-wrap text-white shadow-md shadow-blue-100">
+            {renderCitedContent(message.content, message.sources ?? [])}
           </div>
+          <div className="mt-1 flex items-center justify-end gap-1.5 pr-1 text-[11px] text-neutral-400">
+            <span>{timeString}</span>
+          </div>
+        </div>
+        {showAvatar && (
+          <div className="message-avatar user-avatar" aria-hidden="true">You</div>
         )}
-        <div
-          className={`
-            max-w-full break-words px-4 py-3 text-sm leading-7 whitespace-pre-wrap
-            ${isUser
-              ? 'rounded-2xl rounded-br-md bg-brand-blue text-white shadow-md shadow-blue-100'
-              : 'rounded-2xl rounded-bl-md border border-slate-200/80 bg-white text-neutral-900 shadow-sm'
-            }
-          `}
-        >
-          {renderCitedContent(message.content, message.sources ?? [])}
-        </div>
-        
-        <div className={`mt-1 flex items-center gap-1.5 text-[11px] text-neutral-400 ${isUser ? 'justify-end pr-1' : 'justify-start pl-1'}`}>
-          <span>{timeString}</span>
-        </div>
       </div>
-      
-      {isUser && showAvatar && (
-        <div className="message-avatar user-avatar" aria-hidden="true">You</div>
+    )
+  }
+
+  // Assistant answers fill the full main content column (no avatar indent) so the
+  // answer card, its Evidence panel, the header text and the composer all share
+  // one left/right grid. The avatar becomes a leading row instead of reserving an
+  // offset that would push the answer out of alignment with Evidence.
+  return (
+    <div className="w-full">
+      {showAvatar && (
+        <div className="mb-1.5 flex items-center">
+          <img className="message-avatar" src={productConfig.branding.assistantAvatarPath} alt={productConfig.branding.assistantAvatarAlt} />
+        </div>
       )}
+      {message.freshness?.warning && warningTone(message.freshness.warning) === 'warning' && (
+        <div role="note" className={warningToneClass(message.freshness.warning)}>
+          {warningCopy(message.freshness.warning)}
+        </div>
+      )}
+      <div className="max-w-full break-words rounded-2xl rounded-bl-md border border-slate-200/80 bg-white px-4 py-3 text-sm leading-7 whitespace-pre-wrap text-neutral-900 shadow-sm">
+        {renderCitedContent(message.content, message.sources ?? [])}
+      </div>
+      <div className="mt-1 flex items-center justify-start gap-1.5 pl-1 text-[11px] text-neutral-400">
+        <span>{timeString}</span>
+      </div>
     </div>
   )
 }

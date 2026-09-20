@@ -19,7 +19,7 @@ export function SourcesCard({ sources }: SourcesCardProps) {
   if (safeSources.length === 0) return null
 
   return (
-    <div className="mt-2 animate-slide-up max-w-2xl">
+    <div className="mt-2 w-full animate-slide-up">
       <details className="group rounded-2xl border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
         <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500 transition-colors select-none hover:text-slate-700">
           <svg className="h-3.5 w-3.5 flex-shrink-0 text-brand-blue" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

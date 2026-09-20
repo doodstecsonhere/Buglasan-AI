@@ -43,6 +43,10 @@ import {
   shouldUseZeroEvidenceFallback,
   isValidCitationSource,
   doesAnswerBroadenSubjectScope,
+  evidenceBindsResolvedDate,
+  answerClaimsEventOnResolvedDate,
+  buildUnprovenTemporalFallback,
+  buildTemporalDateProofGuidance,
   type SupportedLanguage,
 } from './grounding.ts'
 import { generateQueryEmbedding } from '../_shared/embedding.ts'
@@ -1142,7 +1146,7 @@ Answer the user's query using ONLY the provided sources and events.
 - Respond in ${language === 'ceb' ? 'Cebuano/Bisaya' : language === 'fil' ? 'Filipino/Tagalog' : 'English'}.
 - Be warm, helpful, and festival-appropriate.
 - ${buildSubjectScopeGuidance()}
-${temporalContext ? '- Note: Events have been pre-filtered based on temporal expressions in the query. Reference this filtering in your answer.' : ''}
+${temporalContext ? '- Note: Events have been pre-filtered based on temporal expressions in the query. Reference this filtering in your answer.\n- ' + buildTemporalDateProofGuidance(language) : ''}
 ${isHistoricalRequest ? `- Note: The user explicitly asked for FY${resolvedYear}. If that year has no current data, say so honestly rather than substituting the current year.` : ''}
 ${isCorrectionQuery ? '- Note: A supersession lineage has been provided. Use it to explain what changed and when, but do not invent details about sources not in the chain.' : ''}
 ${buildInclusiveDateArithmeticGuidance(language)}
@@ -1185,8 +1189,36 @@ ${buildInclusiveDateArithmeticGuidance(language)}
     // regardless of model behavior.
     const evidenceText = evidence.sources.map((s) => s.normalized_text ?? s.raw_text ?? '').join('\n')
     const parentFestivalName = ragPolicy.identity.assistantName.replace(' Assistant', '')
-    const isBroadened = doesAnswerBroadenSubjectScope(generatedText, evidenceText, parentFestivalName)
     let { responseText, citations, claims }
+
+    // Temporal date-proof guard: for a relative-date query (today/tomorrow/this
+    // weekend/next week), a source may support "happening on TARGET_DATE" only
+    // when a structured event falls on that date OR the retrieved evidence text
+    // explicitly binds an event to a date in the resolved window. Semantic
+    // similarity to an undated source is NOT proof, so an affirmative "happening
+    // today" claim built only from such evidence is rejected in favor of a
+    // conservative, evidence-bounded answer. Generalizes across before/during/
+    // after festival and arbitrary exact dates without a one-off rule.
+    const isRelativeDateQuery = temporalResult.isRelative && temporalResult.startDate !== undefined && temporalResult.endDate !== undefined
+    if (isRelativeDateQuery && hasProviderText) {
+      const dateProofText = `${evidenceText}\n${evidence.chunks.map((c) => c.content ?? '').join('\n')}`
+      const hasDateProof = evidence.events.length > 0 || evidenceBindsResolvedDate(dateProofText, temporalResult.startDate!, temporalResult.endDate!)
+      if (!hasDateProof && answerClaimsEventOnResolvedDate(generatedText)) {
+        console.warn('Temporal date-proof guard: rejecting unproven event-on-date claim for a relative-date query')
+        const dateLabel = temporalResult.startDate!.toLocaleDateString('en-PH', { timeZone: PH_TIMEZONE, weekday: 'long', month: 'long', day: 'numeric' })
+        responseText = buildUnprovenTemporalFallback(dateLabel, language)
+        citations = []
+        claims = []
+        const guardedResponse: ChatResponse = {
+          message: { id: crypto.randomUUID(), role: 'assistant', content: responseText, timestamp: new Date().toISOString(), sources: citations, claimCitations: claims, festivalYear: resolvedYear },
+          retrievedSources: evidence.sources, retrievedEvents: evidence.events, retrievedChunks: evidence.chunks, yearResolved: resolvedYear, language,
+        }
+        if (diagnostic) diagnostic.citations = { providerMarkerCount: 0, mappedSourceIds: [], structuredCitationCount: 0, claimCitationCount: 0 }
+        return new Response(JSON.stringify(guardedResponse), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    const isBroadened = doesAnswerBroadenSubjectScope(generatedText, evidenceText, parentFestivalName)
     if (isBroadened && hasProviderText) {
       // Reject broadened answers and force a fallback that respects evidence scope
       console.warn('Subject scope broadening detected, falling back to scoped response')
