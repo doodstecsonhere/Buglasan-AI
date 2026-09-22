@@ -1,31 +1,138 @@
-import { useState } from 'react'
-import { BottomNav, type TabId } from './components/BottomNav'
-import { ScheduleTab } from './components/ScheduleTab'
-import { ChatTab } from './components/ChatTab'
-import { AboutTab } from './components/AboutTab'
+import { useState, useEffect, useRef, useCallback, type FormEvent } from 'react'
+import { ChatInterface } from './components/ChatInterface'
+import { FacebookBadge } from './components/FacebookBadge'
+import { ChatHistoryDrawer } from './components/ChatHistoryDrawer'
+import { AIDisclaimer } from './components/AIDisclaimer'
+import type { ChatLanguage, Message } from './types'
+import { getCurrentFestivalYear } from './utils/dateUtils'
+import { getFestivalQuickQuestions } from './utils/festivalQuickQuestions'
+import { ChatRequestAbortedError, ChatResponseValidationError, chatService } from './services'
+import { addressedThreadId, createChatThread, loadChatThreads, saveChatThreads, titleFromMessages, updateChatThreadMessages, type ChatThread } from './utils/chatThreads'
+import { readInstallDismissed, writeInstallDismissed } from './utils/installPrompt'
+import { productConfig } from './config/productConfig'
+
+interface BeforeInstallPromptEvent extends Event { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('schedule')
+  const festivalYear = getCurrentFestivalYear()
+  const [initialState] = useState(() => {
+    const threads = loadChatThreads()
+    const addressedId = addressedThreadId()
+    const addressedThread = addressedId ? threads.find(thread => thread.id === addressedId) : undefined
+    return { threads, activeThreadId: addressedThread?.id ?? '', messages: addressedThread?.messages ?? [] }
+  })
+  const [threads, setThreads] = useState<ChatThread[]>(initialState.threads)
+  const [activeThreadId, setActiveThreadId] = useState(initialState.activeThreadId)
+  const [messages, setMessages] = useState<Message[]>(initialState.messages)
+  const [isLoading, setIsLoading] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [chatLanguage] = useState<ChatLanguage>(getPreferredChatLanguage)
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [installDismissed, setInstallDismissed] = useState(readInstallDismissed)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const activeThreadRef = useRef(activeThreadId)
+  const requestControllerRef = useRef<AbortController | null>(null)
 
-  return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-navy-900 px-4 py-3 text-white sm:px-6">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-black tracking-tight">BUGLASAN AI</span>
-          <span className="rounded-full bg-navy-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-navy-100">2026</span>
-        </div>
-        <span className="text-xs text-navy-200">Negros Oriental</span>
-      </header>
+  useEffect(() => { saveChatThreads(threads) }, [threads])
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages])
+  useEffect(() => {
+    const updateOnlineStatus = () => setIsOnline(navigator.onLine)
+    window.addEventListener('online', updateOnlineStatus)
+    window.addEventListener('offline', updateOnlineStatus)
+    return () => { window.removeEventListener('online', updateOnlineStatus); window.removeEventListener('offline', updateOnlineStatus) }
+  }, [])
+  useEffect(() => {
+    const beforeInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as BeforeInstallPromptEvent) }
+    const installed = () => { setInstallPrompt(null); setInstallDismissed(true) }
+    window.addEventListener('beforeinstallprompt', beforeInstall)
+    window.addEventListener('appinstalled', installed)
+    return () => { window.removeEventListener('beforeinstallprompt', beforeInstall); window.removeEventListener('appinstalled', installed) }
+  }, [])
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeTab === 'schedule' && <ScheduleTab />}
-        {activeTab === 'chat' && <ChatTab language="en" />}
-        {activeTab === 'about' && <AboutTab />}
+  const persistMessages = useCallback((nextMessages: Message[], targetThreadId: string, createIfMissing = true) => {
+    const thread = !targetThreadId && createIfMissing ? createChatThread(nextMessages) : null
+    const persistedThreadId = targetThreadId || thread?.id || ''
+    if (activeThreadRef.current === targetThreadId || !targetThreadId) setMessages(nextMessages)
+    setThreads(previous => {
+      const current = previous.find(item => item.id === persistedThreadId)
+      if (current) return updateChatThreadMessages(previous, persistedThreadId, nextMessages)
+      if (!thread || !createIfMissing) return previous
+      activeThreadRef.current = persistedThreadId
+      setActiveThreadId(persistedThreadId)
+      return [{ ...thread, messages: nextMessages, title: titleFromMessages(nextMessages), updatedAt: new Date().toISOString() }, ...previous]
+    })
+    return persistedThreadId
+  }, [])
+
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!content.trim() || isLoading) return
+    setErrorMessage(null)
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), timestamp: new Date() }
+    const history = [...messages, userMessage]
+    const originThreadId = persistMessages(history, activeThreadId)
+    const requestController = new AbortController()
+    requestControllerRef.current = requestController
+    setIsLoading(true)
+    try {
+      const response = await chatService.sendMessage({ message: content, festivalYear, language: chatLanguage, conversationHistory: messages.slice(-productConfig.chatPolicy.conversationHistoryLimit).map(m => ({ ...m, timestamp: m.timestamp.toISOString() })), signal: requestController.signal })
+      persistMessages([...history, { id: response.message.id, role: 'assistant', content: response.message.content, timestamp: new Date(response.message.timestamp), sources: response.message.sources, festivalYear: response.message.festivalYear, claimCitations: response.message.claimCitations, freshness: response.freshness }], originThreadId, false)
+    } catch (error) {
+      console.error('Chat error:', error)
+      if (error instanceof ChatRequestAbortedError) return
+      const failure = error instanceof Error && error.name === 'ChatTimeoutError'
+        ? 'The answer took too long. No retry was sent automatically; please try once more.'
+        : error instanceof ChatResponseValidationError
+          ? 'We received an incomplete answer. Please try your question again.'
+          : 'We could not get an answer. Check your connection and try again.'
+      persistMessages([...history, { id: crypto.randomUUID(), role: 'assistant', content: failure, timestamp: new Date(), sources: [] }], originThreadId, false)
+      setErrorMessage(failure)
+    } finally { if (requestControllerRef.current === requestController) requestControllerRef.current = null; setIsLoading(false) }
+  }, [activeThreadId, chatLanguage, festivalYear, isLoading, messages, persistMessages])
+
+  const newChat = useCallback(() => { requestControllerRef.current?.abort(); activeThreadRef.current = ''; setActiveThreadId(''); setMessages([]); setErrorMessage(null); setHistoryOpen(false); window.setTimeout(() => composerRef.current?.focus(), 0) }, [])
+  const selectThread = useCallback((id: string) => { const thread = threads.find(item => item.id === id); if (thread) { activeThreadRef.current = id; setActiveThreadId(id); setMessages(thread.messages); setHistoryOpen(false) } }, [threads])
+  const deleteThread = useCallback((id: string) => { setThreads(previous => previous.filter(thread => thread.id !== id)); if (id === activeThreadId) newChat() }, [activeThreadId, newChat])
+  const installApp = async () => { if (!installPrompt) return; await installPrompt.prompt(); const result = await installPrompt.userChoice; if (result.outcome === 'dismissed') { writeInstallDismissed(); setInstallDismissed(true) }; setInstallPrompt(null) }
+  // Timeline-aware empty-state suggestions: exactly three chips chosen from the
+  // festival-local (Asia/Manila) calendar, never the static branding fallback.
+  const quickQuestions = getFestivalQuickQuestions()
+  const isStandalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true)
+
+  return <div className="app-shell flex min-h-[100dvh] flex-col overflow-hidden text-slate-900">
+    <a href="#chat-composer" className="skip-link">Skip to message composer</a>
+    <FacebookBadge />
+    <div className="flex min-h-0 w-full flex-1">
+      <ChatHistoryDrawer threads={threads} activeThreadId={activeThreadId} open={historyOpen} onClose={() => setHistoryOpen(false)} onNew={newChat} onSelect={selectThread} onDelete={deleteThread} />
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="app-header"><div className="desktop-interaction-rail flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><button onClick={() => setHistoryOpen(true)} className="icon-button md:hidden" aria-label="Open chat history">☰</button><div className="min-w-0"><p className="brand-name">{productConfig.branding.wordmark}</p><h1 className="truncate text-base font-bold sm:text-lg">Your Festival Guide</h1></div></div>{installPrompt && !installDismissed && !isStandalone && <button type="button" className="install-button" onClick={installApp}>Install App</button>}</div></header>
+        {!isOnline && <p className="bg-fiesta-yellow-light px-4 py-2 text-center text-sm font-medium text-slate-800" role="status">You’re offline. {productConfig.identity.assistantName} can answer from verified cached information on this device.</p>}
+        <div className={`conversation-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6 sm:px-6${messages.length === 0 ? ' is-empty' : ''}`} aria-live="polite"><div className="desktop-interaction-rail"><ChatInterface messages={messages} isLoading={isLoading} messagesEndRef={messagesEndRef} isOnline={isOnline} quickQuestions={quickQuestions} onSend={handleSendMessage} /></div></div>
+        {errorMessage && <div className="desktop-interaction-rail px-4 pb-2 sm:px-6"><div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"><span>{errorMessage}</span><button type="button" onClick={() => setErrorMessage(null)} className="rounded px-2 py-1 font-semibold hover:bg-red-100">Dismiss</button></div></div>}
+        <div className="composer-dock"><div className="desktop-interaction-rail"><MessageInput inputRef={composerRef} onSend={handleSendMessage} disabled={isLoading} placeholder={`Ask about ${productConfig.identity.festivalName}...`} /></div></div>
+        {/* The disclaimer is application content, not chrome: it lives inside <main>
+           so its centered axis is the MAIN PANE's axis at every desktop width. As a
+           former shell-level sibling it centered on the viewport instead, leaving it
+           half a sidebar width left of the header / hero / composer. On mobile the
+           sidebar is off-canvas, so <main> is the full viewport width and the footer
+           stays full-width without any spacer. */}
+        <AIDisclaimer />
       </main>
-
-      <BottomNav active={activeTab} onChange={setActiveTab} />
     </div>
-  )
+  </div>
+}
+
+function getPreferredChatLanguage(): ChatLanguage {
+  const browserLanguage = typeof navigator === 'undefined' ? '' : navigator.language.toLowerCase()
+  return productConfig.languages.supported.find(language => language.browserPrefixes.some(prefix => browserLanguage.startsWith(prefix)))?.code ?? productConfig.languages.default
+}
+
+function MessageInput({ onSend, disabled, placeholder, inputRef }: { onSend: (content: string) => void; disabled: boolean; placeholder: string; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
+  const [value, setValue] = useState('')
+  const handleSubmit = (event: FormEvent) => { event.preventDefault(); if (value.trim() && !disabled) { onSend(value); setValue('') } }
+  return <form id="chat-composer" onSubmit={handleSubmit} className="composer-form"><label className="sr-only" htmlFor="message">Your question</label><textarea ref={inputRef} id="message" value={value} onChange={event => setValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSubmit(event) } }} disabled={disabled} placeholder={placeholder} rows={1} maxLength={productConfig.chatPolicy.composerMaxLength} aria-describedby="message-help" className="composer-input" /><button type="submit" disabled={disabled || !value.trim()} className="send-button" aria-label="Send message">↑</button><p id="message-help" className="sr-only">Press Enter to send. Press Shift and Enter for a new line.</p></form>
 }
 
 export default App
